@@ -126,6 +126,15 @@ fn get_chart(file: String) -> Result<ComboChart, String> {
     store::load_chart(&file).map_err(|e| e.to_string())
 }
 
+/// 编辑器保存：无损更新步骤时间
+#[tauri::command]
+fn update_steps(
+    file: String,
+    patches: Vec<engine::chart::StepPatch>,
+) -> Result<usize, String> {
+    store::patch_steps(&file, &patches).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn get_settings() -> store::Settings {
     store::load_settings()
@@ -181,6 +190,7 @@ pub fn run() {
             stop_playback,
             playback_status,
             get_chart,
+            update_steps,
             get_settings,
             set_settings
         ])

@@ -160,6 +160,40 @@ pub fn save_settings(s: &Settings) -> std::io::Result<()> {
     fs::write(path, text)
 }
 
+/// 无损更新步骤时间：读轴库文件为 JSON 树，仅替换匹配步骤的
+/// startMin/startMax/durationMin/durationMax，其余字段（含 wwcombo
+/// 包装层、community、bindings 等）原样保留写回。
+pub fn patch_steps(file: &str, patches: &[crate::chart::StepPatch]) -> std::io::Result<usize> {
+    use serde_json::json;
+    let dir = charts_dir()?;
+    let path = dir.join(safe_name(file)?);
+    let text = fs::read_to_string(&path)?;
+    let mut v: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    let steps = if v.get("chart").map(|c| c.is_object()).unwrap_or(false) {
+        v["chart"]["steps"].as_array_mut()
+    } else {
+        v["steps"].as_array_mut()
+    };
+    let Some(steps) = steps else {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "轴文件无 steps 数组"));
+    };
+    let mut applied = 0;
+    for step in steps.iter_mut() {
+        let Some(id) = step["id"].as_str() else { continue };
+        let Some(p) = patches.iter().find(|p| p.id == id) else { continue };
+        step["startMin"] = json!(p.start_min);
+        step["startMax"] = json!(p.start_min);
+        step["durationMin"] = json!(p.duration_min);
+        step["durationMax"] = json!(p.duration_min);
+        applied += 1;
+    }
+    let out = serde_json::to_string_pretty(&v)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    fs::write(&path, out)?;
+    Ok(applied)
+}
+
 fn settings_path() -> std::io::Result<PathBuf> {
     let base = std::env::var("APPDATA").unwrap_or_else(|_| ".".into());
     let dir = Path::new(&base).join("wuwa-smartkey");

@@ -88,6 +88,15 @@ impl ComboStep {
     }
 }
 
+/// 步骤时间补丁（编辑器保存用）：按 id 定位，start/duration 的 min/max 同步写
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StepPatch {
+    pub id: String,
+    pub start_min: i64,
+    pub duration_min: i64,
+}
+
 impl ComboChart {
     /// 兼容两种文件布局：
     /// - 裸 ComboChart（自建/简易宏）

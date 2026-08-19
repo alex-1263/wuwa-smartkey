@@ -173,13 +173,17 @@ async function select(c: ChartMeta | null) {
   chartDetail.value = null;
   progressPct.value = 0;
   activeStepId.value = null;
+  edits.value = {};
   invoke("set_current_chart", { file: selectedFile.value });
-  if (c) {
-    try {
-      chartDetail.value = await invoke<Chart>("get_chart", { file: c.file });
-    } catch (e) {
-      appendLog(`读取轴数据失败: ${e}`);
-    }
+  if (c) await reloadChart();
+}
+
+async function reloadChart() {
+  if (!selectedFile.value) return;
+  try {
+    chartDetail.value = await invoke<Chart>("get_chart", { file: selectedFile.value });
+  } catch (e) {
+    appendLog(`读取轴数据失败: ${e}`);
   }
 }
 
@@ -322,6 +326,57 @@ function fmtEvent(ev: Record<string, any>): string {
   return JSON.stringify(ev);
 }
 
+// ---- 步骤编辑（时间/按住时长，毫秒） ----
+const showEditor = ref(false);
+const edits = ref<Record<string, { startMin: number; durationMin: number }>>({});
+
+const editRows = computed(() =>
+  (chartDetail.value?.steps ?? []).slice().sort((a, b) => a.startMin - b.startMin)
+);
+
+const dirtyCount = computed(
+  () =>
+    Object.entries(edits.value).filter(([id, e]) => {
+      const s = chartDetail.value?.steps.find((x) => x.id === id);
+      return s && (e.startMin !== s.startMin || e.durationMin !== s.durationMin);
+    }).length
+);
+
+function editVal(s: Step) {
+  return edits.value[s.id] ?? { startMin: s.startMin, durationMin: s.durationMin };
+}
+
+function isDirty(s: Step) {
+  const e = edits.value[s.id];
+  return !!e && (e.startMin !== s.startMin || e.durationMin !== s.durationMin);
+}
+
+function onEditField(s: Step, field: "startMin" | "durationMin", v: string) {
+  const n = parseInt(v, 10);
+  if (!Number.isFinite(n) || n < 0) return;
+  const cur = editVal(s);
+  edits.value[s.id] = { ...cur, [field]: n };
+}
+
+async function saveEdits() {
+  if (!selectedFile.value) return;
+  const patches = Object.entries(edits.value)
+    .filter(([id, e]) => {
+      const s = chartDetail.value?.steps.find((x) => x.id === id);
+      return s && (e.startMin !== s.startMin || e.durationMin !== s.durationMin);
+    })
+    .map(([id, e]) => ({ id, startMin: e.startMin, durationMin: e.durationMin }));
+  if (!patches.length) return;
+  try {
+    const n = await invoke<number>("update_steps", { file: selectedFile.value, patches });
+    edits.value = {};
+    await reloadChart();
+    appendLog(`已保存 ${n} 处步骤时间修改`);
+  } catch (e) {
+    appendLog(`保存失败: ${e}`);
+  }
+}
+
 // ---- 热键设置 ----
 async function beginCapture(which: keyof Hotkeys) {
   capturing.value = which;
@@ -457,6 +512,9 @@ onUnmounted(() => {
             开始
           </button>
           <button :disabled="!playing" @click="stop">停止</button>
+          <button class="toggle-editor" :class="{ on: showEditor }" :disabled="!chartDetail" @click="showEditor = !showEditor">
+            编辑步骤{{ dirtyCount ? ` (${dirtyCount})` : "" }}
+          </button>
         </div>
 
         <div class="timeline" v-if="chartDetail">
@@ -498,6 +556,29 @@ onUnmounted(() => {
           </div>
         </div>
         <div class="timeline empty-timeline" v-else>选择轴后显示时间轴</div>
+
+        <div class="editor" v-if="chartDetail && showEditor">
+          <div class="ed-head">
+            <span class="ed-tip">时间为毫秒。大招动画没走完就被下一招打断？把后面的招式时间推后即可。start 与 duration 的 min/max 会同步更新。</span>
+            <button class="primary" :disabled="!dirtyCount" @click="saveEdits">
+              保存修改{{ dirtyCount ? `（${dirtyCount}）` : "" }}
+            </button>
+          </div>
+          <div class="ed-cols">
+            <span>时间 (ms)</span><span>招式</span><span>位</span><span>按住 (ms)</span><span></span>
+          </div>
+          <div class="ed-rows">
+            <div v-for="s in editRows" :key="s.id" class="ed-row" :class="{ dirty: isDirty(s) }">
+              <input type="number" :value="editVal(s).startMin" @change="onEditField(s, 'startMin', ($event.target as HTMLInputElement).value)" />
+              <span class="ed-label" :style="{ background: s.color ?? '#5a6270' }">{{ s.label }}</span>
+              <span class="ed-slot">{{ s.characterSlot ?? "-" }}</span>
+              <input type="number" :value="editVal(s).durationMin" @change="onEditField(s, 'durationMin', ($event.target as HTMLInputElement).value)" />
+              <span class="ed-lane" :class="{ indep: s.lane === 'independent' }">
+                {{ s.lane === "independent" ? "不占推进" : "" }}
+              </span>
+            </div>
+          </div>
+        </div>
 
         <div v-if="countdown !== null" class="countdown">{{ countdown }}</div>
         <div ref="logBox" class="logs">
@@ -561,6 +642,21 @@ main { display: flex; flex: 1; min-height: 0; }
 .blk.indep { opacity: .55; border: 1px dashed rgba(0,0,0,.45); }
 .blk.active { outline: 2px solid #fff; box-shadow: 0 0 10px rgba(255,255,255,.9); z-index: 2; }
 .cursor { position: absolute; top: 16px; bottom: 0; width: 2px; background: #9fe6b5; box-shadow: 0 0 6px #9fe6b5; z-index: 4; pointer-events: none; }
+
+.editor { flex-shrink: 0; border-bottom: 1px solid #2a2e36; padding: 8px 12px; }
+.ed-head { display: flex; align-items: center; gap: 12px; }
+.ed-tip { font-size: 12px; color: #8a91a0; flex: 1; }
+.ed-cols, .ed-row { display: grid; grid-template-columns: 90px 1fr 36px 90px 64px; gap: 8px; align-items: center; }
+.ed-cols { font-size: 11px; color: #6b7280; padding: 8px 2px 2px; }
+.ed-rows { max-height: 220px; overflow-y: auto; margin-top: 4px; }
+.ed-row { padding: 2px; border-radius: 4px; }
+.ed-row.dirty { background: #3a3320; }
+.ed-row input { width: 100%; padding: 3px 6px; border-radius: 4px; border: 1px solid #3a3f4a; background: #1f232b; color: #e6e8ec; font-size: 12px; }
+.ed-label { font-size: 12px; border-radius: 3px; padding: 1px 6px; color: rgba(0,0,0,.78); justify-self: start; }
+.ed-slot { font-size: 12px; color: #8a91a0; text-align: center; }
+.ed-lane { font-size: 10px; color: #6b7280; }
+.ed-lane.indep { color: #7d8598; font-style: italic; }
+button.toggle-editor.on { background: #3b6ea5; border-color: #3b6ea5; }
 
 .countdown { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); font-size: 96px; font-weight: 700; color: #9fe6b5; text-shadow: 0 0 40px rgba(0,0,0,.6); pointer-events: none; z-index: 10; }
 .logs { flex: 1; overflow-y: auto; padding: 12px 16px; font-family: Consolas, "Courier New", monospace; font-size: 13px; line-height: 1.7; }
