@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, nextTick } from "vue";
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -59,6 +59,29 @@ const capturing = ref<keyof Hotkeys | null>(null);
 const progressPct = ref(0);
 const activeStepId = ref<string | null>(null);
 
+/// 时间轴缩放（1 = 自适应整轴宽度，>1 放大 + 横向滚动）
+const zoom = ref(1);
+const timelineScroll = ref<HTMLElement | null>(null);
+
+function setZoom(z: number) {
+  zoom.value = Math.min(20, Math.max(1, z));
+}
+
+function onWheel(e: WheelEvent) {
+  e.preventDefault();
+  setZoom(zoom.value * (e.deltaY < 0 ? 1.25 : 0.8));
+}
+
+// 播放时滚动视图自动跟随游标
+watch(progressPct, (p) => {
+  const el = timelineScroll.value;
+  if (!el || zoom.value <= 1) return;
+  const target = (p / 100) * el.scrollWidth;
+  if (target < el.scrollLeft + 40 || target > el.scrollLeft + el.clientWidth - 60) {
+    el.scrollLeft = Math.max(0, target - el.clientWidth * 0.3);
+  }
+});
+
 let unlistenEv: UnlistenFn | null = null;
 let unlistenHotkey: UnlistenFn | null = null;
 let countdownTimer: ReturnType<typeof setInterval> | null = null;
@@ -83,20 +106,39 @@ function pct(ms: number): number {
   return (ms / totalMs.value) * 100;
 }
 
-// 单条时间线：所有步骤（含 independent）混排，independent 为不占推进的辅助标记
-const timelineBlocks = computed(() => {
+// 单条时间线按角色槽位分行（wwcombo 音游视图同款分道维度）
+const slotRows = computed(() => {
   const c = chartDetail.value;
   if (!c) return [];
-  return c.steps.map((s) => ({
-    id: s.id,
-    label: s.label,
-    slot: s.characterSlot,
-    independent: s.lane === "independent",
-    left: pct(s.startMin),
-    width: Math.max(pct(s.durationMin), 0.9),
-    color: s.color ?? "#5a6270",
-    title: `${s.label}${s.characterSlot ? ` · ${s.characterSlot}号位` : ""}${s.lane === "independent" ? " · 不占推进" : ""} @${s.startMin}ms`,
+  const slots = [...new Set(c.steps.map((s) => s.characterSlot ?? 0))].sort();
+  return slots.map((slot) => ({
+    slot,
+    name: slot === 0 ? "通用" : `${slot}号位`,
+    blocks: c.steps
+      .filter((s) => (s.characterSlot ?? 0) === slot)
+      .map((s) => ({
+        id: s.id,
+        label: s.label,
+        independent: s.lane === "independent",
+        left: pct(s.startMin),
+        width: Math.max(pct(s.durationMin), 0.35),
+        color: s.color ?? "#5a6270",
+        title: `${s.label}${s.characterSlot ? ` · ${s.characterSlot}号位` : ""}${s.lane === "independent" ? " · 不占推进" : ""} @${s.startMin}ms`,
+      })),
   }));
+});
+
+/// 时间刻度：随缩放自适应步长（每格至少约 70px）
+const timeTicks = computed(() => {
+  const total = totalMs.value;
+  if (total <= 0) return [];
+  const steps = [500, 1000, 2000, 5000, 10000, 20000, 30000, 60000];
+  const pick = steps.find((s) => (s / total) * 100 * zoom.value * 12 >= 70) ?? 60000;
+  const ticks: { left: number; label: string }[] = [];
+  for (let t = 0; t <= total; t += pick) {
+    ticks.push({ left: (t / total) * 100, label: `${(t / 1000).toFixed(t % 1000 === 0 ? 0 : 1)}s` });
+  }
+  return ticks;
 });
 
 const periodMarks = computed(() => {
@@ -395,28 +437,42 @@ onUnmounted(() => {
         </div>
 
         <div class="timeline" v-if="chartDetail">
-          <div class="period-marks">
-            <div v-for="(m, i) in periodMarks" :key="i" class="pmark" :style="{ left: m.left + '%' }">
-              <span>{{ m.label }}</span>
-            </div>
+          <div class="tl-toolbar">
+            <span class="tl-title">时间轴</span>
+            <button class="tl-zoom" @click="setZoom(zoom / 1.25)">−</button>
+            <span class="tl-zoomval">{{ zoom.toFixed(1) }}x</span>
+            <button class="tl-zoom" @click="setZoom(zoom * 1.25)">＋</button>
+            <button class="tl-zoom" @click="setZoom(1)">适配</button>
+            <span class="tl-hint">滚轮缩放</span>
           </div>
-          <div class="lane">
-            <div class="lane-name">轴</div>
-            <div class="lane-body">
-              <div
-                v-for="b in timelineBlocks"
-                :key="b.id"
-                class="blk"
-                :class="{ active: b.id === activeStepId, indep: b.independent }"
-                :style="{ left: b.left + '%', width: b.width + '%', background: b.color }"
-                :title="b.title"
-              >
-                {{ b.label }}
+          <div ref="timelineScroll" class="tl-scroll" @wheel="onWheel">
+            <div class="tl-canvas" :style="{ width: zoom * 100 + '%' }">
+              <div class="tl-ticks">
+                <div v-for="(t, i) in timeTicks" :key="i" class="tick" :style="{ left: t.left + '%' }">
+                  {{ t.label }}
+                </div>
               </div>
+              <div v-for="m in periodMarks" :key="m.label" class="pmark" :style="{ left: m.left + '%' }">
+                <span>{{ m.label }}</span>
+              </div>
+              <div v-for="row in slotRows" :key="row.slot" class="lane">
+                <div class="lane-body">
+                  <div
+                    v-for="b in row.blocks"
+                    :key="b.id"
+                    class="blk"
+                    :class="{ active: b.id === activeStepId, indep: b.independent }"
+                    :style="{ left: b.left + '%', width: b.width + '%', background: b.color }"
+                    :title="b.title"
+                  >
+                    {{ b.label }}
+                  </div>
+                </div>
+                <div class="lane-name">{{ row.name }}</div>
+              </div>
+              <div class="cursor" v-if="playing && progressPct > 0" :style="{ left: progressPct + '%' }"></div>
             </div>
           </div>
-          <div class="cursor" v-if="playing && progressPct > 0" :style="{ left: progressPct + '%' }"></div>
-          <div class="scale">{{ (totalMs / 1000).toFixed(1) }}s</div>
         </div>
         <div class="timeline empty-timeline" v-else>选择轴后显示时间轴</div>
 
@@ -464,17 +520,24 @@ main { display: flex; flex: 1; min-height: 0; }
 .controls label { font-size: 13px; color: #b7bdc9; display: flex; align-items: center; gap: 6px; }
 .controls input:not([type="checkbox"]), .controls select { width: 76px; padding: 4px 8px; border-radius: 6px; border: 1px solid #3a3f4a; background: #1f232b; color: #e6e8ec; }
 
-.timeline { position: relative; border-bottom: 1px solid #2a2e36; padding: 6px 16px 8px 62px; user-select: none; }
-.period-marks { position: relative; height: 16px; }
-.pmark { position: absolute; top: 0; font-size: 11px; color: #8a91a0; transform: translateX(2px); border-left: 1px dashed #4a5160; padding-left: 3px; height: 100%; }
-.lane { display: flex; align-items: center; height: 26px; margin-top: 3px; }
-.lane-name { position: absolute; left: 16px; width: 40px; font-size: 11px; color: #6b7280; }
-.lane-body { position: relative; flex: 1; height: 100%; background: #1a1d23; border-radius: 4px; overflow: hidden; }
-.blk { position: absolute; top: 3px; bottom: 3px; border-radius: 3px; font-size: 10px; line-height: 20px; text-align: center; color: rgba(0,0,0,.75); overflow: hidden; white-space: nowrap; cursor: default; }
+.timeline { flex-shrink: 0; border-bottom: 1px solid #2a2e36; padding-bottom: 6px; user-select: none; }
+.tl-toolbar { display: flex; align-items: center; gap: 6px; padding: 6px 12px 2px; }
+.tl-title { font-size: 12px; color: #8a91a0; }
+.tl-zoom { padding: 1px 9px; font-size: 12px; }
+.tl-zoomval { font-size: 11px; color: #8a91a0; min-width: 36px; text-align: center; }
+.tl-hint { font-size: 11px; color: #555c68; margin-left: auto; }
+.tl-scroll { overflow-x: auto; overflow-y: hidden; padding: 0 12px; }
+.tl-canvas { position: relative; min-width: 100%; height: 100%; }
+.tl-ticks { position: relative; height: 16px; }
+.tick { position: absolute; top: 0; font-size: 10px; color: #6b7280; transform: translateX(2px); border-left: 1px solid #333a46; padding-left: 3px; height: 100%; }
+.pmark { position: absolute; top: 16px; bottom: 0; font-size: 10px; color: #9aa3b2; border-left: 1px dashed #4a5160; padding-left: 3px; pointer-events: none; }
+.lane { position: relative; height: 34px; margin-top: 4px; }
+.lane-body { position: absolute; inset: 0; background: #1a1d23; border-radius: 4px; overflow: hidden; }
+.lane-name { position: absolute; left: 6px; top: 2px; font-size: 10px; color: #cbd2dc; background: rgba(20,22,26,.72); border-radius: 3px; padding: 0 4px; z-index: 3; pointer-events: none; }
+.blk { position: absolute; top: 4px; bottom: 4px; border-radius: 3px; font-size: 10px; line-height: 26px; text-align: center; color: rgba(0,0,0,.78); overflow: hidden; white-space: nowrap; cursor: default; font-weight: 600; }
 .blk.indep { opacity: .55; border: 1px dashed rgba(0,0,0,.45); }
-.blk.active { outline: 2px solid #fff; box-shadow: 0 0 8px rgba(255,255,255,.8); z-index: 2; }
-.cursor { position: absolute; top: 22px; bottom: 14px; left: 62px; width: 2px; background: #9fe6b5; box-shadow: 0 0 6px #9fe6b5; z-index: 3; pointer-events: none; }
-.scale { text-align: right; font-size: 11px; color: #6b7280; margin-top: 2px; }
+.blk.active { outline: 2px solid #fff; box-shadow: 0 0 10px rgba(255,255,255,.9); z-index: 2; }
+.cursor { position: absolute; top: 16px; bottom: 0; width: 2px; background: #9fe6b5; box-shadow: 0 0 6px #9fe6b5; z-index: 4; pointer-events: none; }
 
 .countdown { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); font-size: 96px; font-weight: 700; color: #9fe6b5; text-shadow: 0 0 40px rgba(0,0,0,.6); pointer-events: none; z-index: 10; }
 .logs { flex: 1; overflow-y: auto; padding: 12px 16px; font-family: Consolas, "Courier New", monospace; font-size: 13px; line-height: 1.7; }
