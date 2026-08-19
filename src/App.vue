@@ -106,11 +106,12 @@ function pct(ms: number): number {
 }
 
 // 单条时间轴：所有步骤按时间混排一条线（轴是连贯编排，不按角色分道）。
-// 渲染读"编辑生效值"，编辑未保存时即可预览连锁平移效果。
+// 渲染读"编辑生效值"，未保存即可预览连锁平移效果。
+// 时间上重叠的块做纵向堆叠错位（同色同标签的密集序列也能看出多个）。
 const timelineBlocks = computed(() => {
   const c = chartDetail.value;
   if (!c) return [];
-  return c.steps.map((s) => {
+  const blocks = c.steps.map((s) => {
     const v = editVal(s);
     return {
       id: s.id,
@@ -119,9 +120,20 @@ const timelineBlocks = computed(() => {
       left: pct(v.startMin),
       width: Math.max(pct(v.durationMin), 0.35),
       color: s.color ?? "#5a6270",
+      stack: 0,
       title: `${s.label}${s.characterSlot ? ` · ${s.characterSlot}号位` : ""}${s.lane === "independent" ? " · 不占推进" : ""} @${v.startMin}ms`,
     };
   });
+  let prevEnd = 0;
+  let stack = 0;
+  for (const b of blocks) {
+    const end = b.left + b.width;
+    if (b.left < prevEnd) stack += 1;
+    else stack = 0;
+    b.stack = stack;
+    prevEnd = Math.max(prevEnd, end);
+  }
+  return blocks;
 });
 
 /// 时间刻度：随缩放自适应步长（每格至少约 70px）
@@ -556,7 +568,7 @@ onUnmounted(() => {
                     :key="b.id"
                     class="blk"
                     :class="{ active: b.id === activeStepId, indep: b.independent }"
-                    :style="{ left: b.left + '%', width: b.width + '%', background: b.color }"
+                    :style="{ left: b.left + '%', width: b.width + '%', background: b.color, top: 3 + b.stack * 8 + 'px', height: '26px' }"
                     :title="b.title"
                   >
                     {{ b.label }}

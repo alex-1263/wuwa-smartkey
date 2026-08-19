@@ -303,9 +303,11 @@ fn exec_segment(
     true
 }
 
+/// 按住时长 = durationMin（wwcombo 语义：durationMin 就是该按键的按住时长，
+/// 普攻按住=连续攻击，长按技能=长按）。无显式时长时退化为点按。
 fn hold_ms(s: &ComboStep) -> u64 {
-    if input::is_hold_move(&s.move_id) {
-        s.duration_min.max(input::DEFAULT_TAP_MS as i64) as u64
+    if s.duration_min > 0 {
+        s.duration_min as u64
     } else {
         input::DEFAULT_TAP_MS
     }
