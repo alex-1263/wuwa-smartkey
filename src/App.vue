@@ -685,12 +685,12 @@ main { display: flex; flex: 1; min-height: 0; }
 .tl-zoom { padding: 1px 9px; font-size: 12px; }
 .tl-zoomval { font-size: 11px; color: #8a91a0; min-width: 36px; text-align: center; }
 .tl-hint { font-size: 11px; color: #555c68; margin-left: auto; }
-.tl-scroll { overflow-x: auto; overflow-y: hidden; padding: 0 12px; }
-.tl-canvas { position: relative; min-width: 100%; height: 100%; }
+.tl-scroll { overflow-x: auto; overflow-y: auto; max-height: 300px; padding: 0 12px; }
+.tl-canvas { position: relative; min-width: 100%; }
 .tl-ticks { position: relative; height: 16px; }
 .tick { position: absolute; top: 0; font-size: 10px; color: #6b7280; transform: translateX(2px); border-left: 1px solid #333a46; padding-left: 3px; height: 100%; }
 .pmark { position: absolute; top: 16px; bottom: 0; font-size: 10px; color: #9aa3b2; border-left: 1px dashed #4a5160; padding-left: 3px; pointer-events: none; }
-.lane { position: relative; margin-top: 5px; }
+.lane { position: relative; min-height: 36px; margin-top: 5px; }
 .lane-body { position: absolute; inset: 0; background: #1a1d23; border-radius: 6px; overflow: hidden; }
 .lane-name { position: absolute; left: 6px; top: 2px; font-size: 10px; color: #cbd2dc; background: rgba(20,22,26,.72); border-radius: 3px; padding: 0 4px; z-index: 3; pointer-events: none; }
 /* 胶囊块（借鉴 wwcombo capsule），高度由行内层内联样式控制 */
