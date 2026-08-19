@@ -1,0 +1,41 @@
+- generic [ref=f2e3]:
+  - banner [ref=f2e4]:
+    - heading "wuwa-smartkey" [level=1] [ref=f2e5]
+    - generic [ref=f2e6]: F6 开始 · F7 停止 · F8 从循环重开
+    - generic [ref=f2e7]: 待命
+  - main [ref=f2e8]:
+    - generic [ref=f2e9]:
+      - generic [ref=f2e10]:
+        - button "刷新" [ref=f2e11] [cursor=pointer]
+        - button "导入轴…" [ref=f2e12] [cursor=pointer]
+        - button "删除" [disabled] [ref=f2e13]
+      - list [ref=f2e14]:
+        - listitem [ref=f2e15] [cursor=pointer]:
+          - generic [ref=f2e16]: 调试轴
+          - generic [ref=f2e17]: A/B/C · mock.json
+      - generic [ref=f2e18]:
+        - generic [ref=f2e19]: 热键设置（点击后按下新键，Esc 取消）
+        - generic [ref=f2e20]:
+          - generic [ref=f2e21]: 开始
+          - button "F6" [ref=f2e22] [cursor=pointer]
+          - generic [ref=f2e23]: 停止
+          - button "F7" [ref=f2e24] [cursor=pointer]
+          - generic [ref=f2e25]: 循环重开
+          - button "F8" [ref=f2e26] [cursor=pointer]
+    - generic [ref=f2e27]:
+      - generic [ref=f2e28]:
+        - generic [ref=f2e29]:
+          - text: 模式
+          - combobox "模式" [ref=f2e30]:
+            - option "完整" [selected]
+            - option "仅起手"
+            - option "仅循环"
+        - generic [ref=f2e31]:
+          - text: 循环轮数
+          - textbox "循环轮数" [ref=f2e32]:
+            - /placeholder: 无限
+        - button "开始" [disabled] [ref=f2e33]
+        - button "停止" [disabled] [ref=f2e34]
+        - button "编辑步骤" [disabled] [ref=f2e35]
+      - generic [ref=f2e36]: 选择轴后显示时间轴
+      - generic [ref=f2e37]: 执行日志将显示在这里

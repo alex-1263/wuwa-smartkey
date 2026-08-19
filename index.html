@@ -5,6 +5,70 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>wuwa-smartkey</title>
+    <script>
+      // 浏览器调试模式：非 Tauri 环境（如直接开 vite dev 页面）注入 mock 数据，
+      // Tauri 窗口内不受任何影响。用于在浏览器中调试 UI 渲染。
+      (function () {
+        if (window.__TAURI_INTERNALS__) return;
+        const chart = {
+          id: "mock",
+          title: "调试轴（浏览器 mock）",
+          character: "A / B / C",
+          steps: [],
+          periods: [
+            { id: "p1", kind: "startup_axis", label: "起手", startMs: 0, endMs: 3000 },
+            { id: "p2", kind: "loop_axis", label: "循环", startMs: 3000, endMs: 8000 },
+            { id: "p3", kind: "free_fire", label: "自由", startMs: 6000, endMs: 7000 },
+          ],
+        };
+        const mk = (i, moveId, label, slot, start, lane, color, dur, indep) => ({
+          id: "s" + i,
+          moveId,
+          label,
+          characterSlot: slot,
+          lane: lane || "main",
+          independent: !!indep,
+          startMin: start,
+          startMax: start,
+          durationMin: dur || 120,
+          durationMax: dur || 120,
+          color,
+        });
+        chart.steps = [
+          mk(1, "switch_3", "切人3", 3, 100, "main", "#577590"),
+          mk(2, "skill", "技能", 3, 200, "main", "#6c8cff"),
+          mk(3, "echo", "声骸", 3, 400, "main", "#b983ff"),
+          mk(4, "liberation", "共鸣解放", 3, 600, "main", "#ff6b6b"),
+          mk(5, "switch_2", "切人2", 2, 3200, "main", "#4d908e"),
+          mk(6, "basic_attack", "普攻", 2, 3300, "main", "#7fd1ae", 120, true),
+          mk(7, "basic_attack", "普攻", 2, 3360, "main", "#7fd1ae", 120, true),
+          mk(8, "basic_attack", "普攻", 2, 3420, "main", "#7fd1ae", 120, true),
+          mk(9, "heavy_attack", "重击", 2, 3600, "main", "#62b6cb", 250),
+          mk(10, "skill_hold", "长按技能", 1, 3700, "main", "#8aa2ff", 400),
+          mk(11, "switch_1", "切人1", 1, 5000, "main", "#43aa8b"),
+          mk(12, "skill", "技能", 1, 5100, "main", "#6c8cff"),
+          mk(13, "basic_attack", "自由输出", 1, 6300, "main", "#7fd1ae", 120, true),
+          mk(14, "liberation", "共鸣解放", 1, 7400, "main", "#ff6b6b"),
+        ];
+        const charts = [{ id: "mock", title: "调试轴", character: "A/B/C", tags: [], file: "mock.json" }];
+        window.__TAURI_INTERNALS__ = {
+          transformCallback: function (cb) {
+            return (window.__mockCbId = (window.__mockCbId || 0) + 1);
+          },
+          invoke: function (cmd) {
+            if (cmd === "list_charts") return Promise.resolve(charts);
+            if (cmd === "get_chart") return Promise.resolve(chart);
+            if (cmd === "get_settings")
+              return Promise.resolve({ hotkeyStart: "F6", hotkeyStop: "F7", hotkeyRestart: "F8" });
+            return Promise.resolve(1);
+          },
+          metadata: {
+            currentWindow: { label: "main" },
+            currentWebview: { label: "main" },
+          },
+        };
+      })();
+    </script>
   </head>
 
   <body>

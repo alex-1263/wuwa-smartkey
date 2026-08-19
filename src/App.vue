@@ -71,6 +71,28 @@ function onWheel(e: WheelEvent) {
   setZoom(zoom.value * (e.deltaY < 0 ? 1.25 : 0.8));
 }
 
+// ---- 时间轴面板高度拖拽（借鉴 wwcombo timeline panel drag） ----
+const timelineH = ref(220);
+let tlDragY = 0;
+let tlDragH = 0;
+
+function beginTlDrag(e: PointerEvent) {
+  tlDragY = e.clientY;
+  tlDragH = timelineH.value;
+  window.addEventListener("pointermove", onTlDrag);
+  window.addEventListener("pointerup", endTlDrag);
+  e.preventDefault();
+}
+
+function onTlDrag(e: PointerEvent) {
+  timelineH.value = Math.min(700, Math.max(120, tlDragH + (e.clientY - tlDragY)));
+}
+
+function endTlDrag() {
+  window.removeEventListener("pointermove", onTlDrag);
+  window.removeEventListener("pointerup", endTlDrag);
+}
+
 // 播放时滚动视图自动跟随游标
 watch(progressPct, (p) => {
   const el = timelineScroll.value;
@@ -486,6 +508,7 @@ onUnmounted(() => {
   unlistenHotkey?.();
   cancelCountdown();
   stopPlayClock();
+  endTlDrag();
   window.removeEventListener("keydown", onKeydown);
 });
 </script>
@@ -561,15 +584,16 @@ onUnmounted(() => {
           </button>
         </div>
 
-        <div class="timeline" v-if="chartDetail">
+        <div class="timeline" v-if="chartDetail" :style="{ height: timelineH + 'px' }">
           <div class="tl-toolbar">
             <span class="tl-title">时间轴</span>
             <button class="tl-zoom" @click="setZoom(zoom / 1.25)">−</button>
             <span class="tl-zoomval">{{ zoom.toFixed(1) }}x</span>
             <button class="tl-zoom" @click="setZoom(zoom * 1.25)">＋</button>
             <button class="tl-zoom" @click="setZoom(1)">适配</button>
-            <span class="tl-hint">滚轮缩放</span>
+            <span class="tl-hint">滚轮缩放 · 拖下方横条调高度</span>
           </div>
+          <div class="tl-grip" @pointerdown="beginTlDrag" title="上下拖拽调整时间轴高度"></div>
           <div ref="timelineScroll" class="tl-scroll" @wheel="onWheel">
             <div class="tl-canvas" :style="{ width: zoom * 100 + '%' }">
               <div class="tl-ticks">
@@ -679,13 +703,16 @@ main { display: flex; flex: 1; min-height: 0; }
 .controls label { font-size: 13px; color: #b7bdc9; display: flex; align-items: center; gap: 6px; }
 .controls input:not([type="checkbox"]), .controls select { width: 76px; padding: 4px 8px; border-radius: 6px; border: 1px solid #3a3f4a; background: #1f232b; color: #e6e8ec; }
 
-.timeline { flex-shrink: 0; border-bottom: 1px solid #2a2e36; padding-bottom: 6px; user-select: none; }
+.timeline { flex-shrink: 0; display: flex; flex-direction: column; border-bottom: 1px solid #2a2e36; padding-bottom: 4px; user-select: none; }
+.tl-grip { height: 8px; margin: 0 12px; cursor: ns-resize; border-radius: 4px; background: #2a2e36; position: relative; flex-shrink: 0; }
+.tl-grip::after { content: ""; position: absolute; left: 50%; top: 3px; width: 36px; height: 2px; transform: translateX(-50%); border-radius: 1px; background: #4a5160; }
+.tl-grip:hover::after { background: #7d8598; }
 .tl-toolbar { display: flex; align-items: center; gap: 6px; padding: 6px 12px 2px; }
 .tl-title { font-size: 12px; color: #8a91a0; }
 .tl-zoom { padding: 1px 9px; font-size: 12px; }
 .tl-zoomval { font-size: 11px; color: #8a91a0; min-width: 36px; text-align: center; }
 .tl-hint { font-size: 11px; color: #555c68; margin-left: auto; }
-.tl-scroll { overflow-x: auto; overflow-y: auto; max-height: 300px; padding: 0 12px; }
+.tl-scroll { flex: 1; min-height: 0; overflow-x: auto; overflow-y: auto; padding: 0 12px; }
 .tl-canvas { position: relative; min-width: 100%; }
 .tl-ticks { position: relative; height: 16px; }
 .tick { position: absolute; top: 0; font-size: 10px; color: #6b7280; transform: translateX(2px); border-left: 1px solid #333a46; padding-left: 3px; height: 100%; }
