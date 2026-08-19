@@ -127,6 +127,12 @@ fn run(
     let t0 = Instant::now();
     let mut cur_slot: Option<u8> = None;
     let mut manual_stop = false;
+    // 轴自带显式切人步骤时信任轴编排，禁用自动切人（其 300ms 等待
+    // 不在轴的时间预算内，双发会造成数百 ms 的累积偏差）
+    let auto_switch = !chart
+        .steps
+        .iter()
+        .any(|s| !s.is_skippable() && s.move_id.starts_with("switch_"));
 
     if opts.mode != PlaybackMode::LoopOnly {
         if !exec_segment(
@@ -138,6 +144,7 @@ fn run(
             cb,
             t0,
             &mut cur_slot,
+            auto_switch,
         ) {
             manual_stop = true;
         }
@@ -164,6 +171,7 @@ fn run(
                 cb,
                 t0,
                 &mut cur_slot,
+                auto_switch,
             ) {
                 manual_stop = true;
                 break;
@@ -191,6 +199,7 @@ fn exec_segment(
     cb: &(dyn Fn(PlaybackEvent) + Send + Sync),
     t0: Instant,
     cur_slot: &mut Option<u8>,
+    auto_switch: bool,
 ) -> bool {
     // free_fire 窗口映射到本段时间轴（循环轮内平移 base）
     let windows: Vec<(i64, i64)> = chart
@@ -249,9 +258,9 @@ fn exec_segment(
             return false;
         }
 
-        // 角色切换
+        // 角色切换：仅在轴没有显式切人步骤时兜底
         if let Some(slot) = s.character_slot {
-            if *cur_slot != Some(slot) {
+            if auto_switch && *cur_slot != Some(slot) {
                 let from = *cur_slot;
                 if let Some(dev) = input::default_binding(&format!("switch_{slot}")) {
                     cb(PlaybackEvent::Switch { from, to: slot });
