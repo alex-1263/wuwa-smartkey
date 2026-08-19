@@ -48,7 +48,7 @@ fn main() {
     };
 
     let chart: ComboChart = match std::fs::read_to_string(&path).ok() {
-        Some(text) => serde_json::from_str(&text).unwrap_or_else(|e| {
+        Some(text) => ComboChart::parse(&text).unwrap_or_else(|e| {
             eprintln!("解析轴 JSON 失败: {e}");
             std::process::exit(1);
         }),

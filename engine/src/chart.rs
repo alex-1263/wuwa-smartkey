@@ -86,6 +86,17 @@ impl ComboStep {
 }
 
 impl ComboChart {
+    /// 兼容两种文件布局：
+    /// - 裸 ComboChart（自建/简易宏）
+    /// - wwcombo 导出包装：{"type":"wwcombo-chart","version":3,"chart":{...}}
+    pub fn parse(text: &str) -> Result<ComboChart, serde_json::Error> {
+        let v: serde_json::Value = serde_json::from_str(text)?;
+        match v.get("chart") {
+            Some(inner) if inner.is_object() => serde_json::from_value(inner.clone()),
+            _ => serde_json::from_value(v),
+        }
+    }
+
     pub fn period(&self, kind: PeriodKind) -> Option<&ComboPeriod> {
         self.periods.iter().find(|p| p.kind == kind)
     }

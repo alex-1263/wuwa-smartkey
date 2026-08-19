@@ -36,7 +36,7 @@ pub fn list_charts() -> Vec<ChartMeta> {
             }
             let Some(file) = path.file_name() else { continue };
             if let Ok(text) = fs::read_to_string(&path) {
-                if let Ok(c) = serde_json::from_str::<ComboChart>(&text) {
+                if let Ok(c) = ComboChart::parse(&text) {
                     out.push(ChartMeta {
                         id: c.id,
                         title: c.title,
@@ -55,8 +55,8 @@ pub fn list_charts() -> Vec<ChartMeta> {
 /// 导入轴文件到轴库（校验可解析后落盘）
 pub fn import_from(src: &Path) -> std::io::Result<ChartMeta> {
     let text = fs::read_to_string(src)?;
-    let chart: ComboChart = serde_json::from_str(&text)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    let chart: ComboChart =
+        ComboChart::parse(&text).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     let dir = charts_dir()?;
     let file = format!("{}.json", sanitize(&chart.id));
     fs::write(dir.join(&file), &text)?;
@@ -74,7 +74,7 @@ pub fn load_chart(file: &str) -> std::io::Result<ComboChart> {
     let dir = charts_dir()?;
     let name = safe_name(file)?;
     let text = fs::read_to_string(dir.join(name))?;
-    serde_json::from_str(&text)
+    ComboChart::parse(&text)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
 }
 
