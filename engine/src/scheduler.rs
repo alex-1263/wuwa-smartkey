@@ -258,7 +258,7 @@ fn exec_segment(
             return false;
         }
 
-        // 角色切换：仅在轴没有显式切人步骤时兜底
+        // 角色切换
         if let Some(slot) = s.character_slot {
             if auto_switch && *cur_slot != Some(slot) {
                 let from = *cur_slot;
@@ -280,6 +280,11 @@ fn exec_segment(
             });
             continue;
         };
+        // 预输入：提前 preheatMs 按下（动作结束瞬间输入已被缓冲，衔接无缝）
+        let preheat = s.preheat_ms.unwrap_or(0);
+        if preheat > 0 && !wait_at(at - preheat) {
+            return false;
+        }
         let held = hold_ms(s);
         if opts.dry_run {
             cb(PlaybackEvent::StepDone {
@@ -303,11 +308,13 @@ fn exec_segment(
     true
 }
 
-/// 按住时长 = durationMin（wwcombo 语义：durationMin 就是该按键的按住时长，
-/// 普攻按住=连续攻击，长按技能=长按）。无显式时长时退化为点按。
+/// 按住时长（wwcombo practice.ts 语义）：
+/// - 按住类（heavy_attack / *_hold）：必须按住 durationMin（游戏需要持续按住）
+/// - 普通招式（普攻/技能/切人等）：短按点按立即完成，不等待 duration；
+///   预输入由"提前到 startMin - preheatMs 按下"实现（见 exec_segment）
 fn hold_ms(s: &ComboStep) -> u64 {
-    if s.duration_min > 0 {
-        s.duration_min as u64
+    if input::is_hold_move(&s.move_id) {
+        s.duration_min.max(input::DEFAULT_TAP_MS as i64) as u64
     } else {
         input::DEFAULT_TAP_MS
     }

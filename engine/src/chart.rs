@@ -41,6 +41,9 @@ pub struct ComboStep {
     pub duration_max: i64,
     #[serde(default)]
     pub note: Option<String>,
+    /// 前摇（预输入）：输入提前到 startMin - preheatMs 按下（wwcombo 语义）
+    #[serde(default)]
+    pub preheat_ms: Option<i64>,
     /// 招式块颜色（wwcombo 数据自带，可视化用）
     #[serde(default)]
     pub color: Option<String>,
