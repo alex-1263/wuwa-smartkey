@@ -1,0 +1,128 @@
+//! Win32 输入注入：键盘扫描码 + 鼠标按键（SendInput）。
+//! 引擎内所有输入必须经过本模块，后续紧急停止的强制抬键也在这里集中实现。
+
+use std::time::Duration;
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT, KEYEVENTF_KEYUP,
+    KEYEVENTF_SCANCODE, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_RIGHTDOWN,
+    MOUSEEVENTF_RIGHTUP, MOUSEINPUT, MOUSE_EVENT_FLAGS, VIRTUAL_KEY,
+};
+
+// 扫描码（Set 1）
+pub const SC_1: u16 = 0x02;
+pub const SC_2: u16 = 0x03;
+pub const SC_3: u16 = 0x04;
+pub const SC_4: u16 = 0x05;
+pub const SC_E: u16 = 0x12;
+pub const SC_Q: u16 = 0x10;
+pub const SC_R: u16 = 0x13;
+pub const SC_T: u16 = 0x14;
+pub const SC_F: u16 = 0x21;
+pub const SC_LSHIFT: u16 = 0x2A;
+pub const SC_SPACE: u16 = 0x39;
+
+/// 默认按键时长（点按），ms
+pub const DEFAULT_TAP_MS: u64 = 40;
+/// 切人后的等待时长，ms
+pub const SWITCH_DELAY_MS: u64 = 300;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Device {
+    Key(u16),
+    MouseLeft,
+    MouseRight,
+}
+
+fn send_key(scan: u16, up: bool) {
+    let mut flags = KEYEVENTF_SCANCODE;
+    if up {
+        flags |= KEYEVENTF_KEYUP;
+    }
+    let input = INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: VIRTUAL_KEY(0),
+                wScan: scan,
+                dwFlags: flags,
+                time: 0,
+                dwExtraInfo: 0,
+            },
+        },
+    };
+    unsafe { SendInput(&[input], std::mem::size_of::<INPUT>() as i32) };
+}
+
+fn send_mouse(flags: MOUSE_EVENT_FLAGS) {
+    let input = INPUT {
+        r#type: INPUT_MOUSE,
+        Anonymous: INPUT_0 {
+            mi: MOUSEINPUT {
+                dx: 0,
+                dy: 0,
+                mouseData: 0,
+                dwFlags: flags,
+                time: 0,
+                dwExtraInfo: 0,
+            },
+        },
+    };
+    unsafe { SendInput(&[input], std::mem::size_of::<INPUT>() as i32) };
+}
+
+pub fn dev_down(dev: Device) {
+    match dev {
+        Device::Key(scan) => send_key(scan, false),
+        Device::MouseLeft => send_mouse(MOUSEEVENTF_LEFTDOWN),
+        Device::MouseRight => send_mouse(MOUSEEVENTF_RIGHTDOWN),
+    }
+}
+
+pub fn dev_up(dev: Device) {
+    match dev {
+        Device::Key(scan) => send_key(scan, true),
+        Device::MouseLeft => send_mouse(MOUSEEVENTF_LEFTUP),
+        Device::MouseRight => send_mouse(MOUSEEVENTF_RIGHTUP),
+    }
+}
+
+/// 按下 → 保持 hold → 抬起（阻塞）
+pub fn press(dev: Device, hold: Duration) {
+    dev_down(dev);
+    std::thread::sleep(hold);
+    dev_up(dev);
+}
+
+/// 招式 → 输入设备的默认映射（对应 wwcombo defaults.ts 键鼠表，未含双绑定的右键闪避）
+pub fn default_binding(move_id: &str) -> Option<Device> {
+    let dev = match move_id {
+        "basic_attack" | "heavy_attack" => Device::MouseLeft,
+        "skill" | "skill_hold" => Device::Key(SC_E),
+        "echo" | "echo_hold" => Device::Key(SC_Q),
+        "liberation" | "liberation_hold" => Device::Key(SC_R),
+        "tool" => Device::Key(SC_T),
+        "dodge" | "dodge_hold" => Device::Key(SC_LSHIFT),
+        "jump" | "jump_hold" => Device::Key(SC_SPACE),
+        "switch_1" => Device::Key(SC_1),
+        "switch_2" => Device::Key(SC_2),
+        "switch_3" => Device::Key(SC_3),
+        "switch_4" => Device::Key(SC_4),
+        "finisher" => Device::Key(SC_F),
+        _ => return None,
+    };
+    Some(dev)
+}
+
+/// 长按类招式（按压时长有游戏内语义）
+pub fn is_hold_move(move_id: &str) -> bool {
+    move_id.ends_with("_hold") || move_id == "heavy_attack"
+}
+
+/// 提升系统定时器精度（播放期间持有）
+pub fn begin_high_resolution_timer() {
+    unsafe { windows::Win32::Media::timeBeginPeriod(1) };
+}
+
+pub fn end_high_resolution_timer() {
+    unsafe { windows::Win32::Media::timeEndPeriod(1) };
+}

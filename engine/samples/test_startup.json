@@ -1,0 +1,74 @@
+{
+  "id": "m0-test-chart",
+  "title": "M0 验证轴：普攻-普攻-切人技能",
+  "character": "测试",
+  "characterCount": 3,
+  "tags": ["test"],
+  "version": 1,
+  "createdAt": 1755000000000,
+  "updatedAt": 1755000000000,
+  "startTriggerMoveId": "start_challenge",
+  "steps": [
+    {
+      "id": "s0",
+      "moveId": "start_challenge",
+      "label": "开始",
+      "lane": "main",
+      "startMin": 0,
+      "startMax": 0,
+      "durationMin": 0,
+      "durationMax": 0,
+      "color": "#f5c542",
+      "advancesStep": false
+    },
+    {
+      "id": "s1",
+      "moveId": "basic_attack",
+      "label": "普攻",
+      "characterSlot": 1,
+      "lane": "main",
+      "startMin": 0,
+      "startMax": 120,
+      "durationMin": 60,
+      "durationMax": 90,
+      "color": "#7fd1ae",
+      "advancesStep": false
+    },
+    {
+      "id": "s2",
+      "moveId": "basic_attack",
+      "label": "普攻",
+      "characterSlot": 1,
+      "lane": "main",
+      "startMin": 400,
+      "startMax": 520,
+      "durationMin": 60,
+      "durationMax": 90,
+      "color": "#7fd1ae",
+      "advancesStep": false
+    },
+    {
+      "id": "s3",
+      "moveId": "skill",
+      "label": "技能",
+      "characterSlot": 2,
+      "lane": "main",
+      "startMin": 900,
+      "startMax": 1000,
+      "durationMin": 60,
+      "durationMax": 90,
+      "color": "#6c8cff",
+      "advancesStep": true,
+      "note": "s0 是录制控制招式，应被跳过"
+    }
+  ],
+  "periods": [
+    {
+      "id": "p1",
+      "kind": "startup_axis",
+      "label": "起手",
+      "startMs": 0,
+      "endMs": 1200
+    }
+  ]
+}

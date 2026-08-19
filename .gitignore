@@ -1,0 +1,13 @@
+# Rust 构建产物
+engine/target/
+target/
+
+# Node / 前端（Tauri UI 阶段）
+node_modules/
+dist/
+
+# IDE 与系统文件
+.idea/
+.vscode/
+*.log
+.DS_Store
