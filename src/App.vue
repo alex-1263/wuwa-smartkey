@@ -75,14 +75,14 @@ function parseLoops(): number | null {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-async function start() {
+async function start(modeOverride?: "full" | "startup" | "loop") {
   if (!selectedFile.value || playing.value) return;
   try {
     playing.value = true;
     await invoke("start_playback", {
       file: selectedFile.value,
       loops: parseLoops(),
-      mode: mode.value,
+      mode: modeOverride ?? mode.value,
       dryRun: dryRun.value,
     });
     appendLog(dryRun.value ? "▶ 开始（干跑）" : "▶ 开始播放");
@@ -97,16 +97,16 @@ async function stop() {
   await invoke("stop_playback");
 }
 
-function beginCountdown() {
+function beginCountdown(modeOverride?: "full" | "startup" | "loop") {
   if (!selectedFile.value || playing.value || countdown.value !== null) return;
   countdown.value = 3;
-  appendLog("3 秒后开始，切到游戏窗口…（F7 取消）");
+  appendLog(modeOverride === "loop" ? "3 秒后从循环轴重开，切到游戏窗口…" : "3 秒后开始，切到游戏窗口…（F7 取消）");
   countdownTimer = setInterval(() => {
     if (countdown.value === null) return;
     countdown.value -= 1;
     if (countdown.value <= 0) {
       cancelCountdown();
-      start();
+      start(modeOverride);
     }
   }, 1000);
 }
@@ -140,7 +140,12 @@ onMounted(async () => {
   });
   unlistenHotkey = await listen("hotkey", (e) => {
     if (e.payload === "start") beginCountdown();
-    else if (e.payload === "stop") {
+    else if (e.payload === "restart-loop") {
+      cancelCountdown();
+      playing.value = false;
+      appendLog("热键 F8：从循环轴重开");
+      beginCountdown("loop");
+    } else if (e.payload === "stop") {
       cancelCountdown();
       appendLog("热键 F7：停止");
     }
@@ -158,7 +163,7 @@ onUnmounted(() => {
   <div class="app">
     <header>
       <h1>wuwa-smartkey</h1>
-      <span class="hint">F6 开始（3s 倒计时） · F7 停止</span>
+      <span class="hint">F6 开始 · F7 停止 · F8 从循环重开</span>
       <span class="status" :class="{ on: playing }">{{ playing ? "播放中" : "待命" }}</span>
     </header>
 

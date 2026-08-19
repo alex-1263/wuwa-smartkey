@@ -103,7 +103,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
-                .with_shortcuts(["F6", "F7"])
+                .with_shortcuts(["F6", "F7", "F8"])
                 .expect("注册全局热键失败")
                 .with_handler(|app, shortcut, event| {
                     use tauri_plugin_global_shortcut::ShortcutState;
@@ -118,6 +118,11 @@ pub fn run() {
                         "F7" => {
                             do_stop(app);
                             let _ = app.emit("hotkey", "stop");
+                        }
+                        // 快速重同步：停止当前播放，从循环轴第一拍重开
+                        "F8" => {
+                            do_stop(app);
+                            let _ = app.emit("hotkey", "restart-loop");
                         }
                         _ => {}
                     }
