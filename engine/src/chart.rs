@@ -12,6 +12,8 @@ pub struct ComboChart {
     #[serde(default)]
     pub character: Option<String>,
     #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
     pub character_count: Option<u8>,
     #[serde(default)]
     pub steps: Vec<ComboStep>,
@@ -84,6 +86,10 @@ impl ComboStep {
 }
 
 impl ComboChart {
+    pub fn period(&self, kind: PeriodKind) -> Option<&ComboPeriod> {
+        self.periods.iter().find(|p| p.kind == kind)
+    }
+
     /// 起手轴步骤（主轨、可执行、按开始时间排序）。
     /// 无 startup_axis period 时退化为全部主轨步骤。
     pub fn startup_steps(&self) -> Vec<&ComboStep> {

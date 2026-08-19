@@ -1,7 +1,11 @@
 //! Win32 输入注入：键盘扫描码 + 鼠标按键（SendInput）。
-//! 引擎内所有输入必须经过本模块，后续紧急停止的强制抬键也在这里集中实现。
+//! 引擎内所有输入必须经过本模块：
+//! - 按住追踪：任何路径按下的键都会记录，`release_all` 用于紧急停止时强制抬键
+//! - 可中断等待：播放器停止信号能打断任意等待/按压，且按压保证 down/up 配对
 
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT, KEYEVENTF_KEYUP,
     KEYEVENTF_SCANCODE, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_RIGHTDOWN,
@@ -26,7 +30,7 @@ pub const DEFAULT_TAP_MS: u64 = 40;
 /// 切人后的等待时长，ms
 pub const SWITCH_DELAY_MS: u64 = 300;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Device {
     Key(u16),
     MouseLeft,
@@ -86,11 +90,70 @@ pub fn dev_up(dev: Device) {
     }
 }
 
-/// 按下 → 保持 hold → 抬起（阻塞）
+/// 当前处于按下状态的设备（跨线程共享）
+static HELD: Mutex<Vec<Device>> = Mutex::new(Vec::new());
+
+fn track(dev: Device, down: bool) {
+    let mut held = HELD.lock().unwrap();
+    if down {
+        if !held.contains(&dev) {
+            held.push(dev);
+        }
+    } else {
+        held.retain(|d| *d != dev);
+    }
+}
+
+/// 强制抬起所有处于按下状态的设备（紧急停止兜底）
+pub fn release_all() {
+    let stuck: Vec<Device> = HELD.lock().unwrap().drain(..).collect();
+    for dev in stuck {
+        dev_up(dev);
+    }
+}
+
+/// 可中断睡眠，返回 false 表示收到停止信号
+pub fn sleep_interruptible(ms: u64, stop: &AtomicBool) -> bool {
+    let deadline = Instant::now() + Duration::from_millis(ms);
+    loop {
+        if stop.load(Ordering::SeqCst) {
+            return false;
+        }
+        let remain = deadline.saturating_duration_since(Instant::now());
+        if remain.is_zero() {
+            return true;
+        }
+        std::thread::sleep(remain.min(Duration::from_millis(10)));
+    }
+}
+
+/// 等到 t0 + target_ms，返回 false 表示收到停止信号
+pub fn wait_until_interruptible(t0: Instant, target_ms: i64, stop: &AtomicBool) -> bool {
+    let target = t0 + Duration::from_millis(target_ms.max(0) as u64);
+    let now = Instant::now();
+    if target <= now {
+        return !stop.load(Ordering::SeqCst);
+    }
+    sleep_interruptible((target - now).as_millis() as u64, stop)
+}
+
+/// 按下 → 可中断保持 → 抬起。无论是否被中断，保证 up 配对
+pub fn press_interruptible(dev: Device, hold_ms: u64, stop: &AtomicBool) -> bool {
+    dev_down(dev);
+    track(dev, true);
+    let ok = sleep_interruptible(hold_ms, stop);
+    dev_up(dev);
+    track(dev, false);
+    ok
+}
+
+/// 按下 → 保持 hold → 抬起（阻塞，不可中断）
 pub fn press(dev: Device, hold: Duration) {
     dev_down(dev);
+    track(dev, true);
     std::thread::sleep(hold);
     dev_up(dev);
+    track(dev, false);
 }
 
 /// 招式 → 输入设备的默认映射（对应 wwcombo defaults.ts 键鼠表，未含双绑定的右键闪避）

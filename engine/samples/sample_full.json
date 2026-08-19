@@ -1,0 +1,110 @@
+{
+  "id": "sample-full-axis",
+  "title": "样例完整轴：起手 + 循环 + 自由段",
+  "character": "测试",
+  "characterCount": 3,
+  "tags": ["test"],
+  "version": 1,
+  "createdAt": 1755000000000,
+  "updatedAt": 1755000000000,
+  "startTriggerMoveId": "start_challenge",
+  "steps": [
+    {
+      "id": "s0",
+      "moveId": "start_challenge",
+      "label": "开始",
+      "lane": "main",
+      "startMin": 0,
+      "startMax": 0,
+      "durationMin": 0,
+      "durationMax": 0,
+      "color": "#f5c542",
+      "advancesStep": false
+    },
+    {
+      "id": "s1",
+      "moveId": "basic_attack",
+      "label": "普攻",
+      "characterSlot": 1,
+      "lane": "main",
+      "startMin": 0,
+      "startMax": 120,
+      "durationMin": 60,
+      "durationMax": 90,
+      "color": "#7fd1ae",
+      "advancesStep": false
+    },
+    {
+      "id": "s2",
+      "moveId": "skill",
+      "label": "技能",
+      "characterSlot": 1,
+      "lane": "main",
+      "startMin": 400,
+      "startMax": 520,
+      "durationMin": 60,
+      "durationMax": 90,
+      "color": "#6c8cff",
+      "advancesStep": true
+    },
+    {
+      "id": "l1",
+      "moveId": "echo",
+      "label": "声骸",
+      "characterSlot": 2,
+      "lane": "main",
+      "startMin": 1300,
+      "startMax": 1400,
+      "durationMin": 60,
+      "durationMax": 90,
+      "color": "#b983ff",
+      "advancesStep": true
+    },
+    {
+      "id": "l2",
+      "moveId": "basic_attack",
+      "label": "自由输出",
+      "characterSlot": 2,
+      "lane": "main",
+      "startMin": 2600,
+      "startMax": 2700,
+      "durationMin": 60,
+      "durationMax": 90,
+      "color": "#7fd1ae",
+      "advancesStep": false,
+      "free": true,
+      "note": "处于 free_fire 段内，播放器应跳过该步并静默等待"
+    },
+    {
+      "id": "l3",
+      "moveId": "liberation",
+      "label": "共鸣解放",
+      "characterSlot": 3,
+      "lane": "main",
+      "startMin": 3200,
+      "startMax": 3300,
+      "durationMin": 60,
+      "durationMax": 90,
+      "color": "#ff6b6b",
+      "advancesStep": true
+    },
+    {
+      "id": "i1",
+      "moveId": "tool",
+      "label": "独立轨:工具",
+      "characterSlot": 1,
+      "lane": "independent",
+      "startMin": 1500,
+      "startMax": 1500,
+      "durationMin": 40,
+      "durationMax": 60,
+      "color": "#2dd4bf",
+      "advancesStep": false
+    }
+  ],
+  "periods": [
+    { "id": "p1", "kind": "startup_axis", "label": "起手", "startMs": 0, "endMs": 1200 },
+    { "id": "p2", "kind": "loop_axis", "label": "循环", "startMs": 1200, "endMs": 4000 },
+    { "id": "p3", "kind": "free_fire", "label": "自由", "startMs": 2500, "endMs": 3000 }
+  ]
+}
