@@ -105,26 +105,23 @@ function pct(ms: number): number {
   return (ms / totalMs.value) * 100;
 }
 
-// 单条时间线按角色槽位分行（wwcombo 音游视图同款分道维度）
-const slotRows = computed(() => {
+// 单条时间轴：所有步骤按时间混排一条线（轴是连贯编排，不按角色分道）。
+// 渲染读"编辑生效值"，编辑未保存时即可预览连锁平移效果。
+const timelineBlocks = computed(() => {
   const c = chartDetail.value;
   if (!c) return [];
-  const slots = [...new Set(c.steps.map((s) => s.characterSlot ?? 0))].sort();
-  return slots.map((slot) => ({
-    slot,
-    name: slot === 0 ? "通用" : `${slot}号位`,
-    blocks: c.steps
-      .filter((s) => (s.characterSlot ?? 0) === slot)
-      .map((s) => ({
-        id: s.id,
-        label: s.label,
-        independent: s.lane === "independent",
-        left: pct(s.startMin),
-        width: Math.max(pct(s.durationMin), 0.35),
-        color: s.color ?? "#5a6270",
-        title: `${s.label}${s.characterSlot ? ` · ${s.characterSlot}号位` : ""}${s.lane === "independent" ? " · 不占推进" : ""} @${s.startMin}ms`,
-      })),
-  }));
+  return c.steps.map((s) => {
+    const v = editVal(s);
+    return {
+      id: s.id,
+      label: s.label,
+      independent: s.lane === "independent",
+      left: pct(v.startMin),
+      width: Math.max(pct(v.durationMin), 0.35),
+      color: s.color ?? "#5a6270",
+      title: `${s.label}${s.characterSlot ? ` · ${s.characterSlot}号位` : ""}${s.lane === "independent" ? " · 不占推进" : ""} @${v.startMin}ms`,
+    };
+  });
 });
 
 /// 时间刻度：随缩放自适应步长（每格至少约 70px）
@@ -354,8 +351,24 @@ function isDirty(s: Step) {
 function onEditField(s: Step, field: "startMin" | "durationMin", v: string) {
   const n = parseInt(v, 10);
   if (!Number.isFinite(n) || n < 0) return;
-  const cur = editVal(s);
-  edits.value[s.id] = { ...cur, [field]: n };
+  if (field === "durationMin") {
+    const cur = editVal(s);
+    edits.value[s.id] = { ...cur, durationMin: n };
+    return;
+  }
+  // 连锁平移：修改某步时间，当前时间轴上位于其后的所有步骤整体平移相同差值，
+  // 保持轴内相对节奏。基准始终是"当前编辑生效值"，反复调整/改回都不会错乱。
+  const curStart = editVal(s).startMin;
+  const delta = n - curStart;
+  if (delta === 0) return;
+  for (const st of chartDetail.value?.steps ?? []) {
+    const cur = editVal(st);
+    if (st.id === s.id) {
+      edits.value[st.id] = { ...cur, startMin: n };
+    } else if (cur.startMin >= curStart) {
+      edits.value[st.id] = { ...cur, startMin: cur.startMin + delta };
+    }
+  }
 }
 
 async function saveEdits() {
@@ -536,10 +549,10 @@ onUnmounted(() => {
               <div v-for="m in periodMarks" :key="m.label" class="pmark" :style="{ left: m.left + '%' }">
                 <span>{{ m.label }}</span>
               </div>
-              <div v-for="row in slotRows" :key="row.slot" class="lane">
+              <div class="lane">
                 <div class="lane-body">
                   <div
-                    v-for="b in row.blocks"
+                    v-for="b in timelineBlocks"
                     :key="b.id"
                     class="blk"
                     :class="{ active: b.id === activeStepId, indep: b.independent }"
@@ -549,7 +562,7 @@ onUnmounted(() => {
                     {{ b.label }}
                   </div>
                 </div>
-                <div class="lane-name">{{ row.name }}</div>
+                <div class="lane-name">轴</div>
               </div>
               <div class="cursor" v-if="playing && progressPct > 0" :style="{ left: progressPct + '%' }"></div>
             </div>
@@ -559,7 +572,7 @@ onUnmounted(() => {
 
         <div class="editor" v-if="chartDetail && showEditor">
           <div class="ed-head">
-            <span class="ed-tip">时间为毫秒。大招动画没走完就被下一招打断？把后面的招式时间推后即可。start 与 duration 的 min/max 会同步更新。</span>
+            <span class="ed-tip">毫秒。修改某步时间后，其后的步骤会整体跟随平移（保持节奏）。改错了改回原值即可全部还原。start/duration 的 min/max 同步更新。</span>
             <button class="primary" :disabled="!dirtyCount" @click="saveEdits">
               保存修改{{ dirtyCount ? `（${dirtyCount}）` : "" }}
             </button>
