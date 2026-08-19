@@ -11,3 +11,6 @@ dist/
 .vscode/
 *.log
 .DS_Store
+
+# Tauri 生成文件
+src-tauri/gen/

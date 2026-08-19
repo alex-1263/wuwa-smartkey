@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use crate::chart::ComboChart;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct ChartMeta {
     pub id: String,
     pub title: String,

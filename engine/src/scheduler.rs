@@ -46,7 +46,7 @@ impl Default for PlaybackOptions {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub enum PlaybackEvent {
     Started { title: String },
     LoopRound { round: u32 },
