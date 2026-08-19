@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::Instant;
 
-use crate::chart::{ComboChart, ComboStep, Lane, PeriodKind};
+use crate::chart::{ComboChart, ComboStep, PeriodKind};
 use crate::input;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -121,31 +121,8 @@ fn run(
         title: chart.title.clone(),
     });
 
-    // 独立轨：Full 模式下并行执行一遍（不随循环轮播联动，复杂联动留待后续）
-    let indep_steps: Vec<ComboStep> = chart
-        .steps
-        .iter()
-        .filter(|s| s.lane == Lane::Independent && !s.is_skippable())
-        .cloned()
-        .collect();
-    let indep_handle = (!indep_steps.is_empty()
-        && opts.mode == PlaybackMode::Full
-        && !opts.dry_run)
-    .then(|| {
-        let stop2 = stop.clone();
-        std::thread::spawn(move || {
-            let t0 = Instant::now();
-            for s in &indep_steps {
-                if stop2.load(Ordering::SeqCst) {
-                    break;
-                }
-                input::wait_until_interruptible(t0, s.start_min, &stop2);
-                if let Some(dev) = input::default_binding(&s.move_id) {
-                    input::press_interruptible(dev, hold_ms(s), &stop2);
-                }
-            }
-        })
-    });
+    // 注：lane(main/independent) 是"是否占连段推进"的语义标志，所有步骤
+    // 在同一条时间线上执行（wwcombo 同款语义），无并行轨道。
 
     let t0 = Instant::now();
     let mut cur_slot: Option<u8> = None;
@@ -196,11 +173,6 @@ fn run(
                 break;
             }
         }
-    }
-
-    // 等独立轨收尾
-    if let Some(h) = indep_handle {
-        let _ = h.join();
     }
 
     cb(PlaybackEvent::Stopped {
@@ -330,7 +302,7 @@ fn hold_ms(s: &ComboStep) -> u64 {
     }
 }
 
-/// 循环周期长度：优先 loop_axis period，退化用主轨最后一步的结束时间
+/// 循环周期长度：优先 loop_axis period，退化用最后一步的结束时间
 fn loop_len(chart: &ComboChart) -> i64 {
     if let Some(p) = chart.period(PeriodKind::LoopAxis) {
         (p.end_ms - p.start_ms).max(1)
@@ -338,7 +310,7 @@ fn loop_len(chart: &ComboChart) -> i64 {
         chart
             .steps
             .iter()
-            .filter(|s| s.lane == Lane::Main && !s.is_skippable())
+            .filter(|s| !s.is_skippable())
             .map(|s| s.start_min + s.duration_min)
             .max()
             .unwrap_or(1000)

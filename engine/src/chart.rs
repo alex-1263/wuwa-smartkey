@@ -115,6 +115,8 @@ impl ComboChart {
     }
 
     fn steps_in_period(&self, kind: PeriodKind) -> Vec<&ComboStep> {
+        // lane 是"是否占连段推进"的语义标志（wwcombo 同款），不是分轨：
+        // 所有步骤（main/independent）都在同一条时间线上参与排布与播放
         let range = self
             .periods
             .iter()
@@ -123,7 +125,7 @@ impl ComboChart {
         let mut steps: Vec<&ComboStep> = self
             .steps
             .iter()
-            .filter(|s| s.lane == Lane::Main && !s.is_skippable())
+            .filter(|s| !s.is_skippable())
             .filter(|s| match range {
                 Some((lo, hi)) => s.start_min >= lo && s.start_min < hi,
                 None => true,

@@ -83,23 +83,20 @@ function pct(ms: number): number {
   return (ms / totalMs.value) * 100;
 }
 
-const laneRows = computed(() => {
+// 单条时间线：所有步骤（含 independent）混排，independent 为不占推进的辅助标记
+const timelineBlocks = computed(() => {
   const c = chartDetail.value;
   if (!c) return [];
-  const mk = (s: Step) => ({
+  return c.steps.map((s) => ({
     id: s.id,
     label: s.label,
     slot: s.characterSlot,
-    startMs: s.startMin,
+    independent: s.lane === "independent",
     left: pct(s.startMin),
     width: Math.max(pct(s.durationMin), 0.9),
     color: s.color ?? "#5a6270",
-    title: `${s.label}${s.characterSlot ? ` · ${s.characterSlot}号位` : ""} @${s.startMin}ms`,
-  });
-  return [
-    { name: "主轨", blocks: c.steps.filter((s) => s.lane === "main").map(mk) },
-    { name: "独立", blocks: c.steps.filter((s) => s.lane === "independent").map(mk) },
-  ];
+    title: `${s.label}${s.characterSlot ? ` · ${s.characterSlot}号位` : ""}${s.lane === "independent" ? " · 不占推进" : ""} @${s.startMin}ms`,
+  }));
 });
 
 const periodMarks = computed(() => {
@@ -400,14 +397,14 @@ onUnmounted(() => {
               <span>{{ m.label }}</span>
             </div>
           </div>
-          <div v-for="row in laneRows" :key="row.name" class="lane">
-            <div class="lane-name">{{ row.name }}</div>
+          <div class="lane">
+            <div class="lane-name">轴</div>
             <div class="lane-body">
               <div
-                v-for="b in row.blocks"
+                v-for="b in timelineBlocks"
                 :key="b.id"
                 class="blk"
-                :class="{ active: b.id === activeStepId }"
+                :class="{ active: b.id === activeStepId, indep: b.independent }"
                 :style="{ left: b.left + '%', width: b.width + '%', background: b.color }"
                 :title="b.title"
               >
@@ -471,6 +468,7 @@ main { display: flex; flex: 1; min-height: 0; }
 .lane-name { position: absolute; left: 16px; width: 40px; font-size: 11px; color: #6b7280; }
 .lane-body { position: relative; flex: 1; height: 100%; background: #1a1d23; border-radius: 4px; overflow: hidden; }
 .blk { position: absolute; top: 3px; bottom: 3px; border-radius: 3px; font-size: 10px; line-height: 20px; text-align: center; color: rgba(0,0,0,.75); overflow: hidden; white-space: nowrap; cursor: default; }
+.blk.indep { opacity: .55; border: 1px dashed rgba(0,0,0,.45); }
 .blk.active { outline: 2px solid #fff; box-shadow: 0 0 8px rgba(255,255,255,.8); z-index: 2; }
 .cursor { position: absolute; top: 22px; bottom: 14px; left: 62px; width: 2px; background: #9fe6b5; box-shadow: 0 0 6px #9fe6b5; z-index: 3; pointer-events: none; }
 .scale { text-align: right; font-size: 11px; color: #6b7280; margin-top: 2px; }
