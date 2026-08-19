@@ -46,7 +46,6 @@ const selectedFile = ref<string | null>(null);
 const chartDetail = ref<Chart | null>(null);
 const playing = ref(false);
 const loopsInput = ref<string>("");
-const dryRun = ref(false);
 const mode = ref<"full" | "startup" | "loop">("full");
 const logs = ref<string[]>([]);
 const countdown = ref<number | null>(null);
@@ -223,9 +222,9 @@ async function start(modeOverride?: "full" | "startup" | "loop") {
       file: selectedFile.value,
       loops: parseLoops(),
       mode: modeOverride ?? mode.value,
-      dryRun: dryRun.value,
+      dryRun: false,
     });
-    appendLog(dryRun.value ? "▶ 开始（干跑）" : "▶ 开始播放");
+    appendLog("▶ 开始播放");
   } catch (e) {
     playing.value = false;
     appendLog(`启动失败: ${e}`);
@@ -257,25 +256,52 @@ function cancelCountdown() {
   countdown.value = null;
 }
 
+// ---- 播放时钟：游标按真实时间平滑推进（用最近步骤事件做锚点校准） ----
+let playTimer: ReturnType<typeof setInterval> | null = null;
+let anchorPlanned = 0;
+let anchorTime = 0;
+
+function mapToFirst(ms: number): number {
+  const li = loopInfo.value;
+  if (li && li.len > 0 && ms >= li.start) {
+    return li.start + ((ms - li.start) % li.len);
+  }
+  return ms;
+}
+
+function startPlayClock() {
+  stopPlayClock();
+  anchorPlanned = 0;
+  anchorTime = Date.now();
+  playTimer = setInterval(() => {
+    const ms = mapToFirst(anchorPlanned + (Date.now() - anchorTime));
+    progressPct.value = Math.min((ms / totalMs.value) * 100, 100);
+  }, 100);
+}
+
+function stopPlayClock() {
+  if (playTimer) clearInterval(playTimer);
+  playTimer = null;
+}
+
 /// 播放事件 → 可视化状态
 function updateVisualization(ev: Record<string, any>) {
-  if (ev.StepDone) {
-    const planned: number = ev.StepDone.planned_ms;
-    const li = loopInfo.value;
-    let first = planned;
-    if (li && li.len > 0 && planned >= li.start) {
-      first = li.start + ((planned - li.start) % li.len);
-    }
-    progressPct.value = (first / totalMs.value) * 100;
+  if (ev.Started) {
+    startPlayClock();
+  } else if (ev.StepDone) {
+    anchorPlanned = mapToFirst(ev.StepDone.planned_ms);
+    anchorTime = Date.now();
+    progressPct.value = (anchorPlanned / totalMs.value) * 100;
     const c = chartDetail.value;
     if (c) {
       let best: Step | null = null;
       for (const s of c.steps) {
-        if (!best || Math.abs(s.startMin - first) < Math.abs(best.startMin - first)) best = s;
+        if (!best || Math.abs(s.startMin - anchorPlanned) < Math.abs(best.startMin - anchorPlanned)) best = s;
       }
       activeStepId.value = best?.id ?? null;
     }
   } else if (ev.Stopped) {
+    stopPlayClock();
     progressPct.value = 0;
     activeStepId.value = null;
   }
@@ -360,6 +386,7 @@ onUnmounted(() => {
   unlistenEv?.();
   unlistenHotkey?.();
   cancelCountdown();
+  stopPlayClock();
   window.removeEventListener("keydown", onKeydown);
 });
 </script>
@@ -425,10 +452,6 @@ onUnmounted(() => {
           <label>
             循环轮数
             <input v-model="loopsInput" placeholder="无限" />
-          </label>
-          <label class="chk">
-            <input type="checkbox" v-model="dryRun" />
-            干跑（不发键）
           </label>
           <button class="primary" :disabled="!selectedFile || playing || countdown !== null" @click="beginCountdown()">
             开始
