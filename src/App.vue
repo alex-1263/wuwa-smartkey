@@ -206,7 +206,7 @@ onUnmounted(() => {
             <input type="checkbox" v-model="dryRun" />
             干跑（不发键）
           </label>
-          <button class="primary" :disabled="!selectedFile || playing || countdown !== null" @click="start">
+          <button class="primary" :disabled="!selectedFile || playing || countdown !== null" @click="start()">
             开始
           </button>
           <button :disabled="!playing" @click="stop">停止</button>
