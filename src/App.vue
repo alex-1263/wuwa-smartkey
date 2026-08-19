@@ -17,6 +17,7 @@ const selectedFile = ref<string | null>(null);
 const playing = ref(false);
 const loopsInput = ref<string>("");
 const dryRun = ref(false);
+const mode = ref<"full" | "startup" | "loop">("full");
 const logs = ref<string[]>([]);
 const countdown = ref<number | null>(null);
 const logBox = ref<HTMLElement | null>(null);
@@ -81,7 +82,7 @@ async function start() {
     await invoke("start_playback", {
       file: selectedFile.value,
       loops: parseLoops(),
-      mode: "full",
+      mode: mode.value,
       dryRun: dryRun.value,
     });
     appendLog(dryRun.value ? "▶ 开始（干跑）" : "▶ 开始播放");
@@ -185,6 +186,14 @@ onUnmounted(() => {
       <section class="right">
         <div class="controls">
           <label>
+            模式
+            <select v-model="mode">
+              <option value="full">完整</option>
+              <option value="startup">仅起手</option>
+              <option value="loop">仅循环</option>
+            </select>
+          </label>
+          <label>
             循环轮数
             <input v-model="loopsInput" placeholder="无限" />
           </label>
@@ -232,7 +241,7 @@ main { display: flex; flex: 1; min-height: 0; }
 .right { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .controls { display: flex; align-items: center; gap: 14px; padding: 12px 16px; border-bottom: 1px solid #2a2e36; }
 .controls label { font-size: 13px; color: #b7bdc9; display: flex; align-items: center; gap: 6px; }
-.controls input:not([type="checkbox"]) { width: 70px; padding: 4px 8px; border-radius: 6px; border: 1px solid #3a3f4a; background: #1f232b; color: #e6e8ec; }
+.controls input:not([type="checkbox"]), .controls select { width: 76px; padding: 4px 8px; border-radius: 6px; border: 1px solid #3a3f4a; background: #1f232b; color: #e6e8ec; }
 .countdown { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); font-size: 96px; font-weight: 700; color: #9fe6b5; text-shadow: 0 0 40px rgba(0,0,0,.6); pointer-events: none; }
 .right { position: relative; }
 .logs { flex: 1; overflow-y: auto; padding: 12px 16px; font-family: Consolas, "Courier New", monospace; font-size: 13px; line-height: 1.7; }

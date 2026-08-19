@@ -1,4 +1,5 @@
 //! Tauri 应用层：commands 接引擎、全局热键（F6/F7）、播放事件推送前端。
+#![allow(linker_messages)] // MSVC 生成 dll 导入库的正常输出，无需警告
 
 use std::sync::Mutex;
 
