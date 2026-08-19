@@ -353,6 +353,12 @@ function isDirty(s: Step) {
   return !!e && (e.startMin !== s.startMin || e.durationMin !== s.durationMin);
 }
 
+/// 仅长按类招式（heavy_attack / *_hold）的按住时长由 durationMin 决定；
+/// 点按类招式固定 40ms 点按，该字段不参与执行
+function isHoldMove(moveId: string) {
+  return moveId === "heavy_attack" || moveId.endsWith("_hold");
+}
+
 function onEditField(s: Step, field: "startMin" | "durationMin", v: string) {
   const n = parseInt(v, 10);
   if (!Number.isFinite(n) || n < 0) return;
@@ -577,7 +583,7 @@ onUnmounted(() => {
 
         <div class="editor" v-if="chartDetail && showEditor">
           <div class="ed-head">
-            <span class="ed-tip">毫秒。修改某步时间后，其后的步骤会整体跟随平移（保持节奏）。改错了改回原值即可全部还原。start/duration 的 min/max 同步更新。</span>
+            <span class="ed-tip">修改某步时间后，其后的步骤会整体跟随平移（保持节奏）。「按住」仅对重击/长按类招式有效，点按类招式固定 40ms。start 与 duration 的 min/max 同步更新。</span>
             <button class="primary" :disabled="!dirtyCount" @click="saveEdits">
               保存修改{{ dirtyCount ? `（${dirtyCount}）` : "" }}
             </button>
@@ -590,7 +596,13 @@ onUnmounted(() => {
               <input type="number" :value="Math.round(editVal(s).startMin)" @change="onEditField(s, 'startMin', ($event.target as HTMLInputElement).value)" />
               <span class="ed-label" :style="{ background: s.color ?? '#5a6270' }">{{ s.label }}</span>
               <span class="ed-slot">{{ s.characterSlot ?? "-" }}</span>
-              <input type="number" :value="Math.round(editVal(s).durationMin)" @change="onEditField(s, 'durationMin', ($event.target as HTMLInputElement).value)" />
+              <input
+                v-if="isHoldMove(s.moveId)"
+                type="number"
+                :value="Math.round(editVal(s).durationMin)"
+                @change="onEditField(s, 'durationMin', ($event.target as HTMLInputElement).value)"
+              />
+              <span v-else class="ed-tap" title="点按类招式固定 40ms 点按，durationMin 不参与执行">点按</span>
               <span class="ed-lane" :class="{ indep: s.lane === 'independent' }">
                 {{ s.lane === "independent" ? "不占推进" : "" }}
               </span>
@@ -674,6 +686,7 @@ main { display: flex; flex: 1; min-height: 0; }
 .ed-label { font-size: 12px; border-radius: 3px; padding: 1px 6px; color: rgba(0,0,0,.78); justify-self: start; }
 .ed-slot { font-size: 12px; color: #8a91a0; text-align: center; }
 .ed-lane { font-size: 10px; color: #6b7280; }
+.ed-tap { font-size: 11px; color: #6b7280; text-align: center; cursor: help; }
 .ed-lane.indep { color: #7d8598; font-style: italic; }
 button.toggle-editor.on { background: #3b6ea5; border-color: #3b6ea5; }
 
