@@ -198,7 +198,7 @@ async function stop() {
 function beginCountdown(modeOverride?: "full" | "startup" | "loop") {
   if (!selectedFile.value || playing.value || countdown.value !== null) return;
   countdown.value = 3;
-  appendLog(modeOverride === "loop" ? "3 秒后从循环轴重开，切到游戏窗口…" : "3 秒后开始，切到游戏窗口…（F7 取消）");
+  appendLog("3 秒后开始，切到游戏窗口…（F7 取消）");
   countdownTimer = setInterval(() => {
     if (countdown.value === null) return;
     countdown.value -= 1;
@@ -298,12 +298,15 @@ onMounted(async () => {
     if (ev?.Stopped) playing.value = false;
   });
   unlistenHotkey = await listen("hotkey", (e) => {
-    if (e.payload === "start") beginCountdown();
-    else if (e.payload === "restart-loop") {
+    // 热键在游戏内按下，前台就是游戏，立即开始（倒计时对全屏游戏无反馈，反而像失灵）
+    if (e.payload === "start") {
+      appendLog("热键：立即开始");
+      start();
+    } else if (e.payload === "restart-loop") {
       cancelCountdown();
       playing.value = false;
-      appendLog("热键：从循环轴重开");
-      beginCountdown("loop");
+      appendLog("热键：从循环轴立即重开");
+      start("loop");
     } else if (e.payload === "stop") {
       cancelCountdown();
       appendLog("热键：停止");
@@ -385,7 +388,7 @@ onUnmounted(() => {
             <input type="checkbox" v-model="dryRun" />
             干跑（不发键）
           </label>
-          <button class="primary" :disabled="!selectedFile || playing || countdown !== null" @click="start()">
+          <button class="primary" :disabled="!selectedFile || playing || countdown !== null" @click="beginCountdown()">
             开始
           </button>
           <button :disabled="!playing" @click="stop">停止</button>
