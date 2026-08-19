@@ -34,7 +34,9 @@ pub fn list_charts() -> Vec<ChartMeta> {
             if path.extension().map_or(true, |e| e != "json") {
                 continue;
             }
-            let Some(file) = path.file_name() else { continue };
+            let Some(file) = path.file_name() else {
+                continue;
+            };
             if let Ok(text) = fs::read_to_string(&path) {
                 if let Ok(c) = ComboChart::parse(&text) {
                     out.push(ChartMeta {
@@ -55,8 +57,8 @@ pub fn list_charts() -> Vec<ChartMeta> {
 /// 导入轴文件到轴库（校验可解析后落盘）
 pub fn import_from(src: &Path) -> std::io::Result<ChartMeta> {
     let text = fs::read_to_string(src)?;
-    let chart: ComboChart =
-        ComboChart::parse(&text).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    let chart: ComboChart = ComboChart::parse(&text)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     let dir = charts_dir()?;
     let file = format!("{}.json", sanitize(&chart.id));
     fs::write(dir.join(&file), &text)?;
@@ -74,8 +76,7 @@ pub fn load_chart(file: &str) -> std::io::Result<ComboChart> {
     let dir = charts_dir()?;
     let name = safe_name(file)?;
     let text = fs::read_to_string(dir.join(name))?;
-    ComboChart::parse(&text)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+    ComboChart::parse(&text).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
 }
 
 pub fn delete(file: &str) -> std::io::Result<()> {
@@ -168,20 +169,27 @@ pub fn patch_steps(file: &str, patches: &[crate::chart::StepPatch]) -> std::io::
     let dir = charts_dir()?;
     let path = dir.join(safe_name(file)?);
     let text = fs::read_to_string(&path)?;
-    let mut v: serde_json::Value =
-        serde_json::from_str(&text).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    let mut v: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     let steps = if v.get("chart").map(|c| c.is_object()).unwrap_or(false) {
         v["chart"]["steps"].as_array_mut()
     } else {
         v["steps"].as_array_mut()
     };
     let Some(steps) = steps else {
-        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "轴文件无 steps 数组"));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "轴文件无 steps 数组",
+        ));
     };
     let mut applied = 0;
     for step in steps.iter_mut() {
-        let Some(id) = step["id"].as_str() else { continue };
-        let Some(p) = patches.iter().find(|p| p.id == id) else { continue };
+        let Some(id) = step["id"].as_str() else {
+            continue;
+        };
+        let Some(p) = patches.iter().find(|p| p.id == id) else {
+            continue;
+        };
         step["startMin"] = json!(p.start_min);
         step["startMax"] = json!(p.start_min);
         step["durationMin"] = json!(p.duration_min);

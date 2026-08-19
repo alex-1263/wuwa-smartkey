@@ -41,7 +41,7 @@ pub struct ComboChart {
     pub periods: Vec<ComboPeriod>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ComboStep {
     pub id: String,

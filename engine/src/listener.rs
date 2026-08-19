@@ -37,7 +37,7 @@ unsafe extern "system" fn keyboard_proc(ncode: i32, wparam: WPARAM, lparam: LPAR
         let kb = &*(lparam.0 as *const KBDLLHOOKSTRUCT);
         if kb.flags.0 & LLKHF_INJECTED == 0 {
             if let Some(m) = SENDER.get() {
-                if let Ok(mut guard) = m.try_lock() {
+                if let Ok(guard) = m.try_lock() {
                     if let Some(tx) = guard.as_ref() {
                         let _ = tx.send(kb.vkCode as u32);
                     }

@@ -6,4 +6,5 @@ pub mod hotkey;
 pub mod input;
 pub mod listener;
 pub mod scheduler;
+pub mod semi;
 pub mod store;

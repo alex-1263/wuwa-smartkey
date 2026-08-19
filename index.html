@@ -51,15 +51,26 @@
           mk(14, "liberation", "共鸣解放", 1, 7400, "main", "#ff6b6b"),
         ];
         const charts = [{ id: "mock", title: "调试轴", character: "A/B/C", tags: [], file: "mock.json" }];
+        // Tauri 事件回调调用约定：transformCallback 返回的 id 对应 window._<id>
         window.__TAURI_INTERNALS__ = {
           transformCallback: function (cb) {
-            return (window.__mockCbId = (window.__mockCbId || 0) + 1);
+            const id = (window.__mockCbId = (window.__mockCbId || 0) + 1);
+            window["_" + id] = cb;
+            return id;
           },
-          invoke: function (cmd) {
+          invoke: function (cmd, args) {
             if (cmd === "list_charts") return Promise.resolve(charts);
             if (cmd === "get_chart") return Promise.resolve(chart);
             if (cmd === "get_settings")
               return Promise.resolve({ hotkeyStart: "F6", hotkeyStop: "F7", hotkeyRestart: "F8" });
+            if (cmd === "start_playback") {
+              mockPlayback((args && args.mode) || "full");
+              return Promise.resolve(null);
+            }
+            if (cmd === "stop_playback") {
+              clearTimeout(window.__mockPlayTimer);
+              return Promise.resolve(null);
+            }
             return Promise.resolve(1);
           },
           metadata: {
@@ -67,6 +78,50 @@
             currentWebview: { label: "main" },
           },
         };
+        // 模拟播放事件流：semi 演示等待切人→段播放→打断；其他模式演示普通播放
+        function mockEmit(ev) {
+          for (let i = 1; i <= (window.__mockCbId || 0); i++) {
+            const cb = window["_" + i];
+            if (typeof cb === "function") {
+              try { cb({ event: "playback-event", id: i, payload: ev }); } catch (e) { /* ignore */ }
+            }
+          }
+        }
+        function mockPlayback(mode) {
+          const seq =
+            mode === "semi"
+              ? [
+                  { Started: { title: chart.title } },
+                  { WaitingSwitch: { slot: 3, round: 1, index: 1, total: 3, steps: 3, approx_ms: 500 } },
+                  { Switch: { from: null, to: 3 } },
+                  { StepDone: { label: "技能", planned_ms: 0, actual_ms: 0, held_ms: 40 } },
+                  { StepDone: { label: "共鸣解放", planned_ms: 400, actual_ms: 402, held_ms: 40 } },
+                  { SegmentDone: { slot: 3, reason: "completed" } },
+                  { WaitingSwitch: { slot: 2, round: 1, index: 2, total: 3, steps: 5, approx_ms: 900 } },
+                  { Switch: { from: 3, to: 2 } },
+                  { StepDone: { label: "普攻", planned_ms: 0, actual_ms: 0, held_ms: 40 } },
+                  { SegmentDone: { slot: 2, reason: "switched" } },
+                  { KeyIgnored: { got: 4, expected: 1 } },
+                  { WaitingSwitch: { slot: 1, round: 1, index: 3, total: 3, steps: 2, approx_ms: 400 } },
+                  { Stopped: { reason: "manual" } },
+                ]
+              : [
+                  { Started: { title: chart.title } },
+                  { Switch: { from: null, to: 3 } },
+                  { StepDone: { label: "技能", planned_ms: 200, actual_ms: 201, held_ms: 40 } },
+                  { LoopRound: { round: 1 } },
+                  { StepDone: { label: "普攻", planned_ms: 3300, actual_ms: 3305, held_ms: 40 } },
+                  { FreeFire: { wait_ms: 1000 } },
+                  { Stopped: { reason: "completed" } },
+                ];
+          let i = 0;
+          const step = () => {
+            if (i >= seq.length) return;
+            mockEmit(seq[i++]);
+            window.__mockPlayTimer = setTimeout(step, i === 1 ? 200 : 900);
+          };
+          step();
+        }
       })();
     </script>
   </head>

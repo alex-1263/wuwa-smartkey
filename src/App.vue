@@ -46,10 +46,21 @@ const selectedFile = ref<string | null>(null);
 const chartDetail = ref<Chart | null>(null);
 const playing = ref(false);
 const loopsInput = ref<string>("");
-const mode = ref<"full" | "startup" | "loop">("full");
+const mode = ref<"full" | "startup" | "loop" | "semi">("full");
 const logs = ref<string[]>([]);
 const countdown = ref<number | null>(null);
 const logBox = ref<HTMLElement | null>(null);
+
+/// 半自动模式状态（等待切人 / 段播放中）
+const semiState = ref<{
+  phase: "wait" | "play";
+  slot: number | null;
+  round: number;
+  index: number;
+  total: number;
+  steps: number;
+  approxMs: number;
+} | null>(null);
 
 const hotkeys = ref<Hotkeys>({ start: "F6", stop: "F7", restart: "F8" });
 const capturing = ref<keyof Hotkeys | null>(null);
@@ -262,17 +273,18 @@ function parseLoops(): number | null {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-async function start(modeOverride?: "full" | "startup" | "loop") {
+async function start(modeOverride?: "full" | "startup" | "loop" | "semi") {
   if (!selectedFile.value || playing.value) return;
+  const m = modeOverride ?? mode.value;
   try {
     playing.value = true;
     await invoke("start_playback", {
       file: selectedFile.value,
       loops: parseLoops(),
-      mode: modeOverride ?? mode.value,
+      mode: m,
       dryRun: false,
     });
-    appendLog("▶ 开始播放");
+    appendLog(m === "semi" ? "▶ 半自动开始：按数字键 1-4 切人，对应角色的段自动打出" : "▶ 开始播放");
   } catch (e) {
     playing.value = false;
     appendLog(`启动失败: ${e}`);
@@ -284,8 +296,13 @@ async function stop() {
   await invoke("stop_playback");
 }
 
-function beginCountdown(modeOverride?: "full" | "startup" | "loop") {
+function beginCountdown(modeOverride?: "full" | "startup" | "loop" | "semi") {
   if (!selectedFile.value || playing.value || countdown.value !== null) return;
+  // 半自动开始后只等待切人键、不立即发键，无需倒计时
+  if ((modeOverride ?? mode.value) === "semi") {
+    start(modeOverride);
+    return;
+  }
   countdown.value = 3;
   appendLog("3 秒后开始，切到游戏窗口…（F7 取消）");
   countdownTimer = setInterval(() => {
@@ -336,7 +353,10 @@ function stopPlayClock() {
 function updateVisualization(ev: Record<string, any>) {
   if (ev.Started) {
     startPlayClock();
+    semiState.value = null;
   } else if (ev.StepDone) {
+    // 半自动的 planned_ms 是段内相对时间，无法映射到全局轴，不推游标
+    if (semiState.value) return;
     anchorPlanned = mapToFirst(ev.StepDone.planned_ms);
     anchorTime = Date.now();
     progressPct.value = (anchorPlanned / totalMs.value) * 100;
@@ -352,6 +372,23 @@ function updateVisualization(ev: Record<string, any>) {
     stopPlayClock();
     progressPct.value = 0;
     activeStepId.value = null;
+    semiState.value = null;
+  } else if (ev.WaitingSwitch) {
+    const w = ev.WaitingSwitch;
+    semiState.value = {
+      phase: "wait",
+      slot: w.slot,
+      round: w.round,
+      index: w.index,
+      total: w.total,
+      steps: w.steps,
+      approxMs: w.approx_ms,
+    };
+  } else if (ev.Switch && semiState.value) {
+    // 半自动的段切换事件：切换到播放中状态（Started 之外的 Switch 属于半自动）
+    semiState.value = { ...semiState.value, phase: "play", slot: ev.Switch.to || null };
+  } else if (ev.SegmentDone) {
+    if (semiState.value) semiState.value = { ...semiState.value, phase: "wait" };
   }
 }
 
@@ -366,6 +403,21 @@ function fmtEvent(ev: Record<string, any>): string {
     return `  [${s.planned_ms}ms] ${s.label}（按住 ${s.held_ms}ms，偏差 ${drift >= 0 ? "+" : ""}${drift}ms）`;
   }
   if (ev.StepSkipped) return `  跳过 ${ev.StepSkipped.label}（无映射）`;
+  if (ev.WaitingSwitch) {
+    const w = ev.WaitingSwitch;
+    const slot = w.slot != null ? `${w.slot} 号位` : "任意号位";
+    return `⏳ 等待切人【${slot}】第 ${w.round} 轮 · 段 ${w.index}/${w.total}（${w.steps} 招 ≈ ${w.approx_ms}ms）`;
+  }
+  if (ev.SegmentDone) {
+    const slot = ev.SegmentDone.slot != null ? `${ev.SegmentDone.slot} 号位` : "该";
+    return ev.SegmentDone.reason === "switched"
+      ? `↻ ${slot}段被切人打断`
+      : `✓ ${slot}段打完`;
+  }
+  if (ev.KeyIgnored) {
+    const exp = ev.KeyIgnored.expected != null ? `${ev.KeyIgnored.expected} 号位` : "任意号位";
+    return `  ✗ 按了 ${ev.KeyIgnored.got} 号位（期望 ${exp}），已忽略`;
+  }
   if (ev.Stopped) return ev.Stopped.reason === "manual" ? "■ 已停止" : "■ 播放完成";
   return JSON.stringify(ev);
 }
@@ -569,6 +621,7 @@ onUnmounted(() => {
               <option value="full">完整</option>
               <option value="startup">仅起手</option>
               <option value="loop">仅循环</option>
+              <option value="semi">半自动（手动切人）</option>
             </select>
           </label>
           <label>
@@ -582,6 +635,18 @@ onUnmounted(() => {
           <button class="toggle-editor" :class="{ on: showEditor }" :disabled="!chartDetail" @click="showEditor = !showEditor">
             编辑步骤{{ dirtyCount ? ` (${dirtyCount})` : "" }}
           </button>
+        </div>
+
+        <div class="semi-bar" :class="semiState?.phase" v-if="semiState">
+          <span class="semi-dot"></span>
+          <template v-if="semiState.phase === 'wait'">
+            等待切人 →【{{ semiState.slot ?? "任意" }} 号位】第 {{ semiState.round }} 轮 · 段
+            {{ semiState.index }}/{{ semiState.total }}（{{ semiState.steps }} 招 ≈
+            {{ (semiState.approxMs / 1000).toFixed(1) }}s）— 按对应数字键开打
+          </template>
+          <template v-else>
+            【{{ semiState.slot ?? "?" }} 号位】段播放中…（按切人键可立即打断）
+          </template>
         </div>
 
         <div class="timeline" v-if="chartDetail" :style="{ height: timelineH + 'px' }">
@@ -702,6 +767,15 @@ main { display: flex; flex: 1; min-height: 0; }
 .controls { display: flex; align-items: center; gap: 14px; padding: 12px 16px; border-bottom: 1px solid #2a2e36; }
 .controls label { font-size: 13px; color: #b7bdc9; display: flex; align-items: center; gap: 6px; }
 .controls input:not([type="checkbox"]), .controls select { width: 76px; padding: 4px 8px; border-radius: 6px; border: 1px solid #3a3f4a; background: #1f232b; color: #e6e8ec; }
+
+/* 半自动状态条：等待切人（琥珀）/ 段播放中（绿） */
+.semi-bar { display: flex; align-items: center; gap: 10px; padding: 10px 16px; font-size: 14px; border-bottom: 1px solid #2a2e36; }
+.semi-bar.wait { background: #2b2517; color: #ffd97a; }
+.semi-bar.play { background: #16281c; color: #9fe6b5; }
+.semi-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+.semi-bar.wait .semi-dot { background: #ffd97a; animation: semi-pulse 1s ease-in-out infinite; }
+.semi-bar.play .semi-dot { background: #9fe6b5; }
+@keyframes semi-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
 
 .timeline { flex-shrink: 0; display: flex; flex-direction: column; border-bottom: 1px solid #2a2e36; padding-bottom: 4px; user-select: none; }
 .tl-grip { height: 8px; margin: 0 12px; cursor: ns-resize; border-radius: 4px; background: #2a2e36; position: relative; flex-shrink: 0; }

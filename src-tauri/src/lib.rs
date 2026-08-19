@@ -5,11 +5,25 @@ use std::sync::Mutex;
 
 use engine::chart::ComboChart;
 use engine::scheduler::{Playback, PlaybackEvent, PlaybackMode, PlaybackOptions};
+use engine::semi::SemiPlayback;
 use engine::store;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
-const DEFAULT_HOTKEYS: (&str, &str, &str) = store::DEFAULT_HOTKEYS;
+/// 播放器实例（全自动 / 半自动统一停止接口）
+enum Player {
+    Auto(Playback),
+    Semi(SemiPlayback),
+}
+
+impl Player {
+    fn stop(&mut self) {
+        match self {
+            Player::Auto(p) => p.stop(),
+            Player::Semi(p) => p.stop(),
+        }
+    }
+}
 
 /// 按当前设置（未配置回填默认 F6/F7/F8）注册三个全局热键
 fn register_hotkeys(app: &AppHandle) -> Result<(), String> {
@@ -22,9 +36,7 @@ fn register_hotkeys(app: &AppHandle) -> Result<(), String> {
     let gs = app.global_shortcut();
     let _ = gs.unregister_all();
     for key in keys.iter().flatten() {
-        let sc: Shortcut = key
-            .parse()
-            .map_err(|e| format!("无效热键 {key}: {e:?}"))?;
+        let sc: Shortcut = key.parse().map_err(|e| format!("无效热键 {key}: {e:?}"))?;
         gs.register(sc)
             .map_err(|e| format!("注册热键 {key} 失败: {e}"))?;
     }
@@ -33,7 +45,7 @@ fn register_hotkeys(app: &AppHandle) -> Result<(), String> {
 
 #[derive(Default)]
 struct AppState {
-    playing: Mutex<Option<Playback>>,
+    playing: Mutex<Option<Player>>,
     /// 前端当前选中的轴（热键 F6 直接播放它）
     current: Mutex<Option<String>>,
 }
@@ -49,9 +61,21 @@ fn do_start(
         return Err("已在播放中".into());
     }
     let app2 = app.clone();
-    *playing = Some(Playback::spawn(chart, opts, move |ev: PlaybackEvent| {
-        let _ = app2.emit("playback-event", &ev);
-    }));
+    let semi = opts.mode == PlaybackMode::Semi;
+    let player = if semi {
+        Player::Semi(SemiPlayback::spawn(
+            chart,
+            opts,
+            move |ev: PlaybackEvent| {
+                let _ = app2.emit("playback-event", &ev);
+            },
+        ))
+    } else {
+        Player::Auto(Playback::spawn(chart, opts, move |ev: PlaybackEvent| {
+            let _ = app2.emit("playback-event", &ev);
+        }))
+    };
+    *playing = Some(player);
     Ok(())
 }
 
@@ -99,6 +123,7 @@ fn start_playback(
     let mode = match mode.as_str() {
         "startup" => PlaybackMode::StartupOnly,
         "loop" => PlaybackMode::LoopOnly,
+        "semi" => PlaybackMode::Semi,
         _ => PlaybackMode::Full,
     };
     let opts = PlaybackOptions {
@@ -128,10 +153,7 @@ fn get_chart(file: String) -> Result<ComboChart, String> {
 
 /// 编辑器保存：无损更新步骤时间
 #[tauri::command]
-fn update_steps(
-    file: String,
-    patches: Vec<engine::chart::StepPatch>,
-) -> Result<usize, String> {
+fn update_steps(file: String, patches: Vec<engine::chart::StepPatch>) -> Result<usize, String> {
     store::patch_steps(&file, &patches).map_err(|e| e.to_string())
 }
 

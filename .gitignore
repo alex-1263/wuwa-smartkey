@@ -14,3 +14,5 @@ dist/
 
 # Tauri 生成文件
 src-tauri/gen/
+.playwright-mcp/
+*.png

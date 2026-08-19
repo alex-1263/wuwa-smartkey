@@ -104,6 +104,18 @@ fn track(dev: Device, down: bool) {
     }
 }
 
+/// 按下并计入 HELD 追踪（供需要自行控制等待节奏的调用方使用，如半自动段播放）
+pub fn down_tracked(dev: Device) {
+    dev_down(dev);
+    track(dev, true);
+}
+
+/// 抬起并移出 HELD 追踪，与 down_tracked 配对
+pub fn up_tracked(dev: Device) {
+    dev_up(dev);
+    track(dev, false);
+}
+
 /// 强制抬起所有处于按下状态的设备（紧急停止兜底）
 pub fn release_all() {
     let stuck: Vec<Device> = HELD.lock().unwrap().drain(..).collect();

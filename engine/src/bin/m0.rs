@@ -89,10 +89,7 @@ fn main() {
                 if let Some(dev) = switch_dev {
                     wait_until(t0, s.start_min.round() as i64);
                     input::press(dev, Duration::from_millis(input::DEFAULT_TAP_MS));
-                    println!(
-                        "  [+{}ms] 切人 → {slot}",
-                        t0.elapsed().as_millis()
-                    );
+                    println!("  [+{}ms] 切人 → {slot}", t0.elapsed().as_millis());
                     std::thread::sleep(Duration::from_millis(input::SWITCH_DELAY_MS));
                 }
             }
@@ -101,7 +98,11 @@ fn main() {
 
         wait_until(t0, s.start_min.round() as i64);
         let Some(dev) = input::default_binding(&s.move_id) else {
-            println!("  [+{}ms] {} 无默认映射，跳过", t0.elapsed().as_millis(), s.label);
+            println!(
+                "  [+{}ms] {} 无默认映射，跳过",
+                t0.elapsed().as_millis(),
+                s.label
+            );
             continue;
         };
         input::press(dev, Duration::from_millis(step_hold_ms(s)));

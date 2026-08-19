@@ -16,6 +16,8 @@ pub enum PlaybackMode {
     Full,
     StartupOnly,
     LoopOnly,
+    /// 半自动：切人键玩家手动按，招式自动打（见 semi.rs）
+    Semi,
 }
 
 #[derive(Debug, Clone)]
@@ -48,10 +50,19 @@ impl Default for PlaybackOptions {
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub enum PlaybackEvent {
-    Started { title: String },
-    LoopRound { round: u32 },
-    Switch { from: Option<u8>, to: u8 },
-    FreeFire { wait_ms: i64 },
+    Started {
+        title: String,
+    },
+    LoopRound {
+        round: u32,
+    },
+    Switch {
+        from: Option<u8>,
+        to: u8,
+    },
+    FreeFire {
+        wait_ms: i64,
+    },
     StepDone {
         label: String,
         move_id: String,
@@ -60,8 +71,33 @@ pub enum PlaybackEvent {
         held_ms: u64,
     },
     /// 招式无输入映射，跳过
-    StepSkipped { label: String, move_id: String },
-    Stopped { reason: &'static str },
+    StepSkipped {
+        label: String,
+        move_id: String,
+    },
+    Stopped {
+        reason: &'static str,
+    },
+    // —— 半自动模式事件 ——
+    /// 等待玩家手动切人（按下对应槽位的数字键后开打下一段）
+    WaitingSwitch {
+        slot: Option<u8>,
+        round: u32,
+        index: usize,
+        total: usize,
+        steps: usize,
+        approx_ms: i64,
+    },
+    /// 一个角色段结束（completed = 打完；switched = 被玩家切人打断）
+    SegmentDone {
+        slot: Option<u8>,
+        reason: &'static str,
+    },
+    /// 玩家按了轴上后续不存在的角色键，忽略并继续等待
+    KeyIgnored {
+        got: u8,
+        expected: Option<u8>,
+    },
 }
 
 pub struct Playback {
@@ -247,7 +283,9 @@ fn exec_segment(
                 return false;
             }
             let wait = (fe - fs).min(opts.free_fire_timeout_ms as f64);
-            cb(PlaybackEvent::FreeFire { wait_ms: wait.round() as i64 });
+            cb(PlaybackEvent::FreeFire {
+                wait_ms: wait.round() as i64,
+            });
             if !sleep_ms(wait.round() as u64) {
                 return false;
             }
@@ -312,7 +350,7 @@ fn exec_segment(
 /// - 按住类（heavy_attack / *_hold）：必须按住 durationMin（游戏需要持续按住）
 /// - 普通招式（普攻/技能/切人等）：短按点按立即完成，不等待 duration；
 ///   预输入由"提前到 startMin - preheatMs 按下"实现（见 exec_segment）
-fn hold_ms(s: &ComboStep) -> u64 {
+pub fn hold_ms(s: &ComboStep) -> u64 {
     if input::is_hold_move(&s.move_id) {
         s.duration_min.round().max(input::DEFAULT_TAP_MS as f64) as u64
     } else {
