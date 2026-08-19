@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick } from "vue";
+import { ref, computed, onMounted, onUnmounted, nextTick } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -11,9 +11,39 @@ interface ChartMeta {
   tags: string[];
   file: string;
 }
+interface Step {
+  id: string;
+  moveId: string;
+  label: string;
+  characterSlot: number | null;
+  lane: "main" | "independent";
+  startMin: number;
+  startMax: number;
+  durationMin: number;
+  color: string | null;
+}
+interface Period {
+  id: string;
+  kind: string;
+  label: string | null;
+  startMs: number;
+  endMs: number;
+}
+interface Chart {
+  id: string;
+  title: string;
+  steps: Step[];
+  periods: Period[];
+}
+interface Hotkeys {
+  start: string;
+  stop: string;
+  restart: string;
+}
 
 const charts = ref<ChartMeta[]>([]);
 const selectedFile = ref<string | null>(null);
+const chartDetail = ref<Chart | null>(null);
 const playing = ref(false);
 const loopsInput = ref<string>("");
 const dryRun = ref(false);
@@ -22,9 +52,70 @@ const logs = ref<string[]>([]);
 const countdown = ref<number | null>(null);
 const logBox = ref<HTMLElement | null>(null);
 
+const hotkeys = ref<Hotkeys>({ start: "F6", stop: "F7", restart: "F8" });
+const capturing = ref<keyof Hotkeys | null>(null);
+
+/// 可视化：播放进度（映射到首轮坐标，百分比）
+const progressPct = ref(0);
+const activeStepId = ref<string | null>(null);
+
 let unlistenEv: UnlistenFn | null = null;
 let unlistenHotkey: UnlistenFn | null = null;
 let countdownTimer: ReturnType<typeof setInterval> | null = null;
+
+// ---- 时间轴布局计算 ----
+const totalMs = computed(() => {
+  const c = chartDetail.value;
+  if (!c) return 1;
+  const byPeriods = c.periods.reduce((m, p) => Math.max(m, p.endMs), 0);
+  const bySteps = c.steps.reduce((m, s) => Math.max(m, s.startMin + s.durationMin), 0);
+  return Math.max(byPeriods, bySteps, 1);
+});
+
+const loopInfo = computed(() => {
+  const c = chartDetail.value;
+  const p = c?.periods.find((x) => x.kind === "loop_axis");
+  if (!p) return null;
+  return { start: p.startMs, len: p.endMs - p.startMs };
+});
+
+function pct(ms: number): number {
+  return (ms / totalMs.value) * 100;
+}
+
+const laneRows = computed(() => {
+  const c = chartDetail.value;
+  if (!c) return [];
+  const mk = (s: Step) => ({
+    id: s.id,
+    label: s.label,
+    slot: s.characterSlot,
+    startMs: s.startMin,
+    left: pct(s.startMin),
+    width: Math.max(pct(s.durationMin), 0.9),
+    color: s.color ?? "#5a6270",
+    title: `${s.label}${s.characterSlot ? ` · ${s.characterSlot}号位` : ""} @${s.startMin}ms`,
+  });
+  return [
+    { name: "主轨", blocks: c.steps.filter((s) => s.lane === "main").map(mk) },
+    { name: "独立", blocks: c.steps.filter((s) => s.lane === "independent").map(mk) },
+  ];
+});
+
+const periodMarks = computed(() => {
+  const c = chartDetail.value;
+  if (!c) return [];
+  const names: Record<string, string> = {
+    startup_axis: "起手",
+    loop_axis: "循环",
+    free_fire: "自由",
+    draft_period: "草稿",
+  };
+  return c.periods.map((p) => ({
+    label: `${names[p.kind] ?? p.kind}${p.label ? `:${p.label}` : ""}`,
+    left: pct(p.startMs),
+  }));
+});
 
 function appendLog(line: string) {
   logs.value.push(line);
@@ -39,9 +130,19 @@ async function refresh() {
   }
 }
 
-function select(c: ChartMeta | null) {
+async function select(c: ChartMeta | null) {
   selectedFile.value = c?.file ?? null;
+  chartDetail.value = null;
+  progressPct.value = 0;
+  activeStepId.value = null;
   invoke("set_current_chart", { file: selectedFile.value });
+  if (c) {
+    try {
+      chartDetail.value = await invoke<Chart>("get_chart", { file: c.file });
+    } catch (e) {
+      appendLog(`读取轴数据失败: ${e}`);
+    }
+  }
 }
 
 async function importChart() {
@@ -117,6 +218,30 @@ function cancelCountdown() {
   countdown.value = null;
 }
 
+/// 播放事件 → 可视化状态
+function updateVisualization(ev: Record<string, any>) {
+  if (ev.StepDone) {
+    const planned: number = ev.StepDone.planned_ms;
+    const li = loopInfo.value;
+    let first = planned;
+    if (li && li.len > 0 && planned >= li.start) {
+      first = li.start + ((planned - li.start) % li.len);
+    }
+    progressPct.value = (first / totalMs.value) * 100;
+    const c = chartDetail.value;
+    if (c) {
+      let best: Step | null = null;
+      for (const s of c.steps) {
+        if (!best || Math.abs(s.startMin - first) < Math.abs(best.startMin - first)) best = s;
+      }
+      activeStepId.value = best?.id ?? null;
+    }
+  } else if (ev.Stopped) {
+    progressPct.value = 0;
+    activeStepId.value = null;
+  }
+}
+
 function fmtEvent(ev: Record<string, any>): string {
   if (ev.Started) return `▶ 开始: ${ev.Started.title}`;
   if (ev.LoopRound) return `── 循环第 ${ev.LoopRound.round} 轮 ──`;
@@ -132,22 +257,59 @@ function fmtEvent(ev: Record<string, any>): string {
   return JSON.stringify(ev);
 }
 
+// ---- 热键设置 ----
+async function beginCapture(which: keyof Hotkeys) {
+  capturing.value = which;
+}
+
+async function onKeydown(e: KeyboardEvent) {
+  if (!capturing.value) return;
+  e.preventDefault();
+  e.stopPropagation();
+  if (e.code === "Escape") {
+    capturing.value = null;
+    return;
+  }
+  const which = capturing.value;
+  capturing.value = null;
+  const next = { ...hotkeys.value, [which]: e.code } as Hotkeys;
+  try {
+    await invoke("set_settings", {
+      settings: { hotkeyStart: next.start, hotkeyStop: next.stop, hotkeyRestart: next.restart },
+    });
+    hotkeys.value = next;
+    appendLog(`热键已更新: 开始=${next.start} 停止=${next.stop} 循环重开=${next.restart}`);
+  } catch (err) {
+    appendLog(`热键设置失败: ${err}`);
+  }
+}
+
 onMounted(async () => {
   await refresh();
+  try {
+    const s = await invoke<{ hotkeyStart: string; hotkeyStop: string; hotkeyRestart: string }>("get_settings");
+    hotkeys.value = { start: s.hotkeyStart, stop: s.hotkeyStop, restart: s.hotkeyRestart };
+  } catch {
+    /* 默认 F6/F7/F8 */
+  }
+  window.addEventListener("keydown", onKeydown);
+
   unlistenEv = await listen("playback-event", (e) => {
-    appendLog(fmtEvent(e.payload as Record<string, any>));
-    if ((e.payload as any)?.Stopped) playing.value = false;
+    const ev = e.payload as Record<string, any>;
+    appendLog(fmtEvent(ev));
+    updateVisualization(ev);
+    if (ev?.Stopped) playing.value = false;
   });
   unlistenHotkey = await listen("hotkey", (e) => {
     if (e.payload === "start") beginCountdown();
     else if (e.payload === "restart-loop") {
       cancelCountdown();
       playing.value = false;
-      appendLog("热键 F8：从循环轴重开");
+      appendLog("热键：从循环轴重开");
       beginCountdown("loop");
     } else if (e.payload === "stop") {
       cancelCountdown();
-      appendLog("热键 F7：停止");
+      appendLog("热键：停止");
     }
   });
 });
@@ -156,6 +318,7 @@ onUnmounted(() => {
   unlistenEv?.();
   unlistenHotkey?.();
   cancelCountdown();
+  window.removeEventListener("keydown", onKeydown);
 });
 </script>
 
@@ -163,7 +326,9 @@ onUnmounted(() => {
   <div class="app">
     <header>
       <h1>wuwa-smartkey</h1>
-      <span class="hint">F6 开始 · F7 停止 · F8 从循环重开</span>
+      <span class="hint">
+        {{ hotkeys.start }} 开始 · {{ hotkeys.stop }} 停止 · {{ hotkeys.restart }} 从循环重开
+      </span>
       <span class="status" :class="{ on: playing }">{{ playing ? "播放中" : "待命" }}</span>
     </header>
 
@@ -186,6 +351,23 @@ onUnmounted(() => {
           </li>
           <li v-if="charts.length === 0" class="empty">轴库为空，点击「导入轴…」加载 wwcombo 导出的 JSON</li>
         </ul>
+        <div class="hotkey-panel">
+          <div class="panel-title">热键设置（点击后按下新键，Esc 取消）</div>
+          <div class="hotkey-row">
+            <span>开始</span>
+            <button class="hk" :class="{ cap: capturing === 'start' }" @click="beginCapture('start')">
+              {{ capturing === "start" ? "按下新键…" : hotkeys.start }}
+            </button>
+            <span>停止</span>
+            <button class="hk" :class="{ cap: capturing === 'stop' }" @click="beginCapture('stop')">
+              {{ capturing === "stop" ? "按下新键…" : hotkeys.stop }}
+            </button>
+            <span>循环重开</span>
+            <button class="hk" :class="{ cap: capturing === 'restart' }" @click="beginCapture('restart')">
+              {{ capturing === "restart" ? "按下新键…" : hotkeys.restart }}
+            </button>
+          </div>
+        </div>
       </section>
 
       <section class="right">
@@ -211,6 +393,33 @@ onUnmounted(() => {
           </button>
           <button :disabled="!playing" @click="stop">停止</button>
         </div>
+
+        <div class="timeline" v-if="chartDetail">
+          <div class="period-marks">
+            <div v-for="(m, i) in periodMarks" :key="i" class="pmark" :style="{ left: m.left + '%' }">
+              <span>{{ m.label }}</span>
+            </div>
+          </div>
+          <div v-for="row in laneRows" :key="row.name" class="lane">
+            <div class="lane-name">{{ row.name }}</div>
+            <div class="lane-body">
+              <div
+                v-for="b in row.blocks"
+                :key="b.id"
+                class="blk"
+                :class="{ active: b.id === activeStepId }"
+                :style="{ left: b.left + '%', width: b.width + '%', background: b.color }"
+                :title="b.title"
+              >
+                {{ b.label }}
+              </div>
+            </div>
+          </div>
+          <div class="cursor" v-if="playing && progressPct > 0" :style="{ left: progressPct + '%' }"></div>
+          <div class="scale">{{ (totalMs / 1000).toFixed(1) }}s</div>
+        </div>
+        <div class="timeline empty-timeline" v-else>选择轴后显示时间轴</div>
+
         <div v-if="countdown !== null" class="countdown">{{ countdown }}</div>
         <div ref="logBox" class="logs">
           <div v-for="(l, i) in logs" :key="i" class="line">{{ l }}</div>
@@ -233,7 +442,7 @@ header h1 { font-size: 18px; font-weight: 600; }
 .status.on { background: #2e5e3a; color: #9fe6b5; }
 
 main { display: flex; flex: 1; min-height: 0; }
-.left { width: 320px; border-right: 1px solid #2a2e36; display: flex; flex-direction: column; }
+.left { width: 330px; border-right: 1px solid #2a2e36; display: flex; flex-direction: column; }
 .toolbar { display: flex; gap: 8px; padding: 10px; }
 .chart-list { list-style: none; flex: 1; overflow-y: auto; padding: 0 10px 10px; }
 .chart-list li { padding: 10px 12px; border-radius: 8px; cursor: pointer; }
@@ -241,14 +450,32 @@ main { display: flex; flex: 1; min-height: 0; }
 .chart-list li.active { background: #26304a; }
 .chart-list .title { font-size: 14px; }
 .chart-list .meta { font-size: 12px; color: #8a91a0; margin-top: 2px; }
-.chart-list .empty, .logs .empty { color: #6b7280; font-size: 13px; padding: 16px; text-align: center; }
+.chart-list .empty, .logs .empty, .empty-timeline { color: #6b7280; font-size: 13px; padding: 16px; text-align: center; }
 
-.right { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.hotkey-panel { border-top: 1px solid #2a2e36; padding: 10px 12px; }
+.panel-title { font-size: 12px; color: #8a91a0; margin-bottom: 8px; }
+.hotkey-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; color: #b7bdc9; }
+.hotkey-row .hk { min-width: 64px; padding: 4px 8px; font-size: 12px; }
+.hotkey-row .hk.cap { background: #3b6ea5; border-color: #3b6ea5; animation: pulse 1s infinite; }
+@keyframes pulse { 50% { opacity: .6; } }
+
+.right { flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative; }
 .controls { display: flex; align-items: center; gap: 14px; padding: 12px 16px; border-bottom: 1px solid #2a2e36; }
 .controls label { font-size: 13px; color: #b7bdc9; display: flex; align-items: center; gap: 6px; }
 .controls input:not([type="checkbox"]), .controls select { width: 76px; padding: 4px 8px; border-radius: 6px; border: 1px solid #3a3f4a; background: #1f232b; color: #e6e8ec; }
-.countdown { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); font-size: 96px; font-weight: 700; color: #9fe6b5; text-shadow: 0 0 40px rgba(0,0,0,.6); pointer-events: none; }
-.right { position: relative; }
+
+.timeline { position: relative; border-bottom: 1px solid #2a2e36; padding: 6px 16px 8px 62px; user-select: none; }
+.period-marks { position: relative; height: 16px; }
+.pmark { position: absolute; top: 0; font-size: 11px; color: #8a91a0; transform: translateX(2px); border-left: 1px dashed #4a5160; padding-left: 3px; height: 100%; }
+.lane { display: flex; align-items: center; height: 26px; margin-top: 3px; }
+.lane-name { position: absolute; left: 16px; width: 40px; font-size: 11px; color: #6b7280; }
+.lane-body { position: relative; flex: 1; height: 100%; background: #1a1d23; border-radius: 4px; overflow: hidden; }
+.blk { position: absolute; top: 3px; bottom: 3px; border-radius: 3px; font-size: 10px; line-height: 20px; text-align: center; color: rgba(0,0,0,.75); overflow: hidden; white-space: nowrap; cursor: default; }
+.blk.active { outline: 2px solid #fff; box-shadow: 0 0 8px rgba(255,255,255,.8); z-index: 2; }
+.cursor { position: absolute; top: 22px; bottom: 14px; left: 62px; width: 2px; background: #9fe6b5; box-shadow: 0 0 6px #9fe6b5; z-index: 3; pointer-events: none; }
+.scale { text-align: right; font-size: 11px; color: #6b7280; margin-top: 2px; }
+
+.countdown { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); font-size: 96px; font-weight: 700; color: #9fe6b5; text-shadow: 0 0 40px rgba(0,0,0,.6); pointer-events: none; z-index: 10; }
 .logs { flex: 1; overflow-y: auto; padding: 12px 16px; font-family: Consolas, "Courier New", monospace; font-size: 13px; line-height: 1.7; }
 .logs .line:nth-child(odd) { background: rgba(255,255,255,.02); }
 

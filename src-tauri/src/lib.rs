@@ -3,9 +3,33 @@
 
 use std::sync::Mutex;
 
+use engine::chart::ComboChart;
 use engine::scheduler::{Playback, PlaybackEvent, PlaybackMode, PlaybackOptions};
 use engine::store;
 use tauri::{AppHandle, Emitter, Manager};
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
+
+const DEFAULT_HOTKEYS: (&str, &str, &str) = store::DEFAULT_HOTKEYS;
+
+/// 按当前设置（未配置回填默认 F6/F7/F8）注册三个全局热键
+fn register_hotkeys(app: &AppHandle) -> Result<(), String> {
+    let s = store::load_settings();
+    let keys = [
+        s.hotkey_start.clone(),
+        s.hotkey_stop.clone(),
+        s.hotkey_restart.clone(),
+    ];
+    let gs = app.global_shortcut();
+    let _ = gs.unregister_all();
+    for key in keys.iter().flatten() {
+        let sc: Shortcut = key
+            .parse()
+            .map_err(|e| format!("无效热键 {key}: {e:?}"))?;
+        gs.register(sc)
+            .map_err(|e| format!("注册热键 {key} 失败: {e}"))?;
+    }
+    Ok(())
+}
 
 #[derive(Default)]
 struct AppState {
@@ -96,6 +120,23 @@ fn playback_status(app: AppHandle) -> bool {
     app.state::<AppState>().playing.lock().unwrap().is_some()
 }
 
+/// 完整轴数据（可视化用）
+#[tauri::command]
+fn get_chart(file: String) -> Result<ComboChart, String> {
+    store::load_chart(&file).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_settings() -> store::Settings {
+    store::load_settings()
+}
+
+#[tauri::command]
+fn set_settings(app: AppHandle, settings: store::Settings) -> Result<(), String> {
+    store::save_settings(&settings).map_err(|e| e.to_string())?;
+    register_hotkeys(&app)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -103,32 +144,33 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
-                .with_shortcuts(["F6", "F7", "F8"])
-                .expect("注册全局热键失败")
                 .with_handler(|app, shortcut, event| {
-                    use tauri_plugin_global_shortcut::ShortcutState;
                     if event.state != ShortcutState::Pressed {
                         return;
                     }
-                    match shortcut.to_string().as_str() {
+                    // 与设置中的热键匹配（热键可由用户自定义）
+                    let s = store::load_settings();
+                    let key = shortcut.to_string();
+                    if Some(&key) == s.hotkey_start.as_ref() {
                         // 开始逻辑放前端：倒计时（可取消）后再调 start_playback
-                        "F6" => {
-                            let _ = app.emit("hotkey", "start");
-                        }
-                        "F7" => {
-                            do_stop(app);
-                            let _ = app.emit("hotkey", "stop");
-                        }
+                        let _ = app.emit("hotkey", "start");
+                    } else if Some(&key) == s.hotkey_stop.as_ref() {
+                        do_stop(app);
+                        let _ = app.emit("hotkey", "stop");
+                    } else if Some(&key) == s.hotkey_restart.as_ref() {
                         // 快速重同步：停止当前播放，从循环轴第一拍重开
-                        "F8" => {
-                            do_stop(app);
-                            let _ = app.emit("hotkey", "restart-loop");
-                        }
-                        _ => {}
+                        do_stop(app);
+                        let _ = app.emit("hotkey", "restart-loop");
                     }
                 })
                 .build(),
         )
+        .setup(|app| {
+            if let Err(e) = register_hotkeys(app.handle()) {
+                eprintln!("热键注册失败: {e}");
+            }
+            Ok(())
+        })
         .manage(AppState::default())
         .invoke_handler(tauri::generate_handler![
             list_charts,
@@ -137,7 +179,10 @@ pub fn run() {
             set_current_chart,
             start_playback,
             stop_playback,
-            playback_status
+            playback_status,
+            get_chart,
+            get_settings,
+            set_settings
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

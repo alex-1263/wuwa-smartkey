@@ -41,6 +41,9 @@ pub struct ComboStep {
     pub duration_max: i64,
     #[serde(default)]
     pub note: Option<String>,
+    /// 招式块颜色（wwcombo 数据自带，可视化用）
+    #[serde(default)]
+    pub color: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]

@@ -102,3 +102,67 @@ fn sanitize(s: &str) -> String {
         })
         .collect()
 }
+
+/// 应用设置（热键等），持久化在 %APPDATA%/wuwa-smartkey/settings.json
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Settings {
+    pub hotkey_start: Option<String>,
+    pub hotkey_stop: Option<String>,
+    pub hotkey_restart: Option<String>,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            hotkey_start: None,
+            hotkey_stop: None,
+            hotkey_restart: None,
+        }
+    }
+}
+
+pub const DEFAULT_HOTKEYS: (&str, &str, &str) = ("F6", "F7", "F8");
+
+/// 读取设置；未配置的热键回填默认值（F6/F7/F8）
+pub fn load_settings() -> Settings {
+    let path = match settings_path() {
+        Ok(p) => p,
+        Err(_) => return Settings::default(),
+    };
+    let parsed = fs::read_to_string(path)
+        .ok()
+        .and_then(|t| serde_json::from_str::<Settings>(&t).ok())
+        .unwrap_or_default();
+    Settings {
+        hotkey_start: Some(
+            parsed
+                .hotkey_start
+                .unwrap_or_else(|| DEFAULT_HOTKEYS.0.into()),
+        ),
+        hotkey_stop: Some(
+            parsed
+                .hotkey_stop
+                .unwrap_or_else(|| DEFAULT_HOTKEYS.1.into()),
+        ),
+        hotkey_restart: Some(
+            parsed
+                .hotkey_restart
+                .unwrap_or_else(|| DEFAULT_HOTKEYS.2.into()),
+        ),
+    }
+}
+
+pub fn save_settings(s: &Settings) -> std::io::Result<()> {
+    let path = settings_path()?;
+    let text = serde_json::to_string_pretty(s)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    fs::write(path, text)
+}
+
+fn settings_path() -> std::io::Result<PathBuf> {
+    let base = std::env::var("APPDATA").unwrap_or_else(|_| ".".into());
+    let dir = Path::new(&base).join("wuwa-smartkey");
+    fs::create_dir_all(&dir)?;
+    Ok(dir.join("settings.json"))
+}
