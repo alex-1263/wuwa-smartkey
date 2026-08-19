@@ -63,7 +63,7 @@ const zoom = ref(1);
 const timelineScroll = ref<HTMLElement | null>(null);
 
 function setZoom(z: number) {
-  zoom.value = Math.min(20, Math.max(1, z));
+  zoom.value = Math.min(200, Math.max(1, z));
 }
 
 function onWheel(e: WheelEvent) {
@@ -107,44 +107,37 @@ function pct(ms: number): number {
 
 // 单条时间轴：所有步骤按时间混排一条线（轴是连贯编排，不按角色分道）。
 // 渲染读"编辑生效值"，未保存即可预览连锁平移效果。
-// 时间上重叠的块做纵向堆叠错位（同色同标签的密集序列也能看出多个）。
+// 重叠处理借鉴 wwcombo stairRoleOffset：按角色槽位阶梯错位（1号位偏上、
+// 2号位居中、3号位偏下），同角色同层对齐，不同角色自动分开。
 const timelineBlocks = computed(() => {
   const c = chartDetail.value;
   if (!c) return [];
-  const blocks = c.steps.map((s) => {
+  return c.steps.map((s) => {
     const v = editVal(s);
+    const slot = s.characterSlot ?? 0;
     return {
       id: s.id,
       label: s.label,
+      slot,
       independent: s.lane === "independent",
       left: pct(v.startMin),
       width: Math.max(pct(v.durationMin), 0.35),
       color: s.color ?? "#5a6270",
-      stack: 0,
+      stair: slot === 0 ? 0 : (slot - 2) * 5,
       title: `${s.label}${s.characterSlot ? ` · ${s.characterSlot}号位` : ""}${s.lane === "independent" ? " · 不占推进" : ""} @${v.startMin}ms`,
     };
   });
-  let prevEnd = 0;
-  let stack = 0;
-  for (const b of blocks) {
-    const end = b.left + b.width;
-    if (b.left < prevEnd) stack += 1;
-    else stack = 0;
-    b.stack = stack;
-    prevEnd = Math.max(prevEnd, end);
-  }
-  return blocks;
 });
 
-/// 时间刻度：随缩放自适应步长（每格至少约 70px）
+// 时间刻度：随缩放自适应步长（每格约 70px），支持细粒度
 const timeTicks = computed(() => {
   const total = totalMs.value;
   if (total <= 0) return [];
-  const steps = [500, 1000, 2000, 5000, 10000, 20000, 30000, 60000];
+  const steps = [50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 30000, 60000];
   const pick = steps.find((s) => (s / total) * 100 * zoom.value * 12 >= 70) ?? 60000;
   const ticks: { left: number; label: string }[] = [];
   for (let t = 0; t <= total; t += pick) {
-    ticks.push({ left: (t / total) * 100, label: `${(t / 1000).toFixed(t % 1000 === 0 ? 0 : 1)}s` });
+    ticks.push({ left: (t / total) * 100, label: `${(t / 1000).toFixed(pick < 1000 ? 2 : t % 1000 === 0 ? 0 : 1)}s` });
   }
   return ticks;
 });
@@ -568,7 +561,7 @@ onUnmounted(() => {
                     :key="b.id"
                     class="blk"
                     :class="{ active: b.id === activeStepId, indep: b.independent }"
-                    :style="{ left: b.left + '%', width: b.width + '%', background: b.color, top: 3 + b.stack * 8 + 'px', height: '26px' }"
+                    :style="{ left: b.left + '%', width: b.width + '%', background: b.color, top: 6 + b.stair + 'px', height: '28px' }"
                     :title="b.title"
                   >
                     {{ b.label }}
@@ -660,11 +653,12 @@ main { display: flex; flex: 1; min-height: 0; }
 .tl-ticks { position: relative; height: 16px; }
 .tick { position: absolute; top: 0; font-size: 10px; color: #6b7280; transform: translateX(2px); border-left: 1px solid #333a46; padding-left: 3px; height: 100%; }
 .pmark { position: absolute; top: 16px; bottom: 0; font-size: 10px; color: #9aa3b2; border-left: 1px dashed #4a5160; padding-left: 3px; pointer-events: none; }
-.lane { position: relative; height: 34px; margin-top: 4px; }
-.lane-body { position: absolute; inset: 0; background: #1a1d23; border-radius: 4px; overflow: hidden; }
+.lane { position: relative; height: 44px; margin-top: 4px; }
+.lane-body { position: absolute; inset: 0; background: #1a1d23; border-radius: 6px; overflow: hidden; }
 .lane-name { position: absolute; left: 6px; top: 2px; font-size: 10px; color: #cbd2dc; background: rgba(20,22,26,.72); border-radius: 3px; padding: 0 4px; z-index: 3; pointer-events: none; }
-.blk { position: absolute; top: 4px; bottom: 4px; border-radius: 3px; font-size: 10px; line-height: 26px; text-align: center; color: rgba(0,0,0,.78); overflow: hidden; white-space: nowrap; cursor: default; font-weight: 600; }
-.blk.indep { opacity: .55; border: 1px dashed rgba(0,0,0,.45); }
+/* 胶囊块（借鉴 wwcombo capsule） */
+.blk { position: absolute; border-radius: 999px; font-size: 11px; line-height: 28px; text-align: center; color: rgba(0,0,0,.8); overflow: hidden; white-space: nowrap; cursor: default; font-weight: 700; border: 1px solid rgba(255,255,255,.22); }
+.blk.indep { opacity: .5; border: 1px dashed rgba(0,0,0,.5); }
 .blk.active { outline: 2px solid #fff; box-shadow: 0 0 10px rgba(255,255,255,.9); z-index: 2; }
 .cursor { position: absolute; top: 16px; bottom: 0; width: 2px; background: #9fe6b5; box-shadow: 0 0 6px #9fe6b5; z-index: 4; pointer-events: none; }
 
