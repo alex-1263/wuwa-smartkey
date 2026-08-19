@@ -138,7 +138,7 @@ fn run(
         if !exec_segment(
             chart,
             chart.startup_steps(),
-            0,
+            0.0,
             opts,
             &stop,
             cb,
@@ -161,7 +161,7 @@ fn run(
         let mut round: u32 = 0;
         loop {
             cb(PlaybackEvent::LoopRound { round: round + 1 });
-            let base = round as i64 * t_len;
+            let base = round as f64 * t_len;
             if !exec_segment(
                 chart,
                 chart.loop_steps(),
@@ -193,7 +193,7 @@ fn run(
 fn exec_segment(
     chart: &ComboChart,
     steps: Vec<&ComboStep>,
-    base: i64,
+    base: f64,
     opts: &PlaybackOptions,
     stop: &AtomicBool,
     cb: &(dyn Fn(PlaybackEvent) + Send + Sync),
@@ -202,7 +202,7 @@ fn exec_segment(
     auto_switch: bool,
 ) -> bool {
     // free_fire 窗口映射到本段时间轴（循环轮内平移 base）
-    let windows: Vec<(i64, i64)> = chart
+    let windows: Vec<(f64, f64)> = chart
         .periods
         .iter()
         .filter(|p| p.kind == PeriodKind::FreeFire)
@@ -214,11 +214,11 @@ fn exec_segment(
         windows.iter().any(|(fs, fe)| at >= *fs && at < *fe)
     };
 
-    let wait_at = |t: i64| -> bool {
+    let wait_at = |t: f64| -> bool {
         if opts.dry_run {
             true
         } else {
-            input::wait_until_interruptible(t0, t, stop)
+            input::wait_until_interruptible(t0, t.round() as i64, stop)
         }
     };
     let sleep_ms = |ms: u64| -> bool {
@@ -246,9 +246,9 @@ fn exec_segment(
             if !wait_at(fs) {
                 return false;
             }
-            let wait = (fe - fs).min(opts.free_fire_timeout_ms as i64);
-            cb(PlaybackEvent::FreeFire { wait_ms: wait });
-            if !sleep_ms(wait as u64) {
+            let wait = (fe - fs).min(opts.free_fire_timeout_ms as f64);
+            cb(PlaybackEvent::FreeFire { wait_ms: wait.round() as i64 });
+            if !sleep_ms(wait.round() as u64) {
                 return false;
             }
             wi += 1;
@@ -281,8 +281,8 @@ fn exec_segment(
             continue;
         };
         // 预输入：提前 preheatMs 按下（动作结束瞬间输入已被缓冲，衔接无缝）
-        let preheat = s.preheat_ms.unwrap_or(0);
-        if preheat > 0 && !wait_at(at - preheat) {
+        let preheat = s.preheat_ms.unwrap_or(0.0);
+        if preheat > 0.0 && !wait_at(at - preheat) {
             return false;
         }
         let held = hold_ms(s);
@@ -290,8 +290,8 @@ fn exec_segment(
             cb(PlaybackEvent::StepDone {
                 label: s.label.clone(),
                 move_id: s.move_id.clone(),
-                planned_ms: at,
-                actual_ms: at as i128,
+                planned_ms: at.round() as i64,
+                actual_ms: at.round() as i128,
                 held_ms: held,
             });
         } else {
@@ -299,7 +299,7 @@ fn exec_segment(
             cb(PlaybackEvent::StepDone {
                 label: s.label.clone(),
                 move_id: s.move_id.clone(),
-                planned_ms: at,
+                planned_ms: at.round() as i64,
                 actual_ms: t0.elapsed().as_millis() as i128,
                 held_ms: held,
             });
@@ -314,24 +314,23 @@ fn exec_segment(
 ///   预输入由"提前到 startMin - preheatMs 按下"实现（见 exec_segment）
 fn hold_ms(s: &ComboStep) -> u64 {
     if input::is_hold_move(&s.move_id) {
-        s.duration_min.max(input::DEFAULT_TAP_MS as i64) as u64
+        s.duration_min.round().max(input::DEFAULT_TAP_MS as f64) as u64
     } else {
         input::DEFAULT_TAP_MS
     }
 }
 
 /// 循环周期长度：优先 loop_axis period，退化用最后一步的结束时间
-fn loop_len(chart: &ComboChart) -> i64 {
+fn loop_len(chart: &ComboChart) -> f64 {
     if let Some(p) = chart.period(PeriodKind::LoopAxis) {
-        (p.end_ms - p.start_ms).max(1)
+        (p.end_ms - p.start_ms).max(1.0)
     } else {
         chart
             .steps
             .iter()
             .filter(|s| !s.is_skippable())
             .map(|s| s.start_min + s.duration_min)
-            .max()
-            .unwrap_or(1000)
-            .max(1)
+            .fold(0.0_f64, |m, v| m.max(v))
+            .max(1.0)
     }
 }

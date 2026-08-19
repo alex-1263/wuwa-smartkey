@@ -594,10 +594,10 @@ onUnmounted(() => {
           </div>
           <div class="ed-rows">
             <div v-for="s in editRows" :key="s.id" class="ed-row" :class="{ dirty: isDirty(s) }">
-              <input type="number" :value="editVal(s).startMin" @change="onEditField(s, 'startMin', ($event.target as HTMLInputElement).value)" />
+              <input type="number" :value="Math.round(editVal(s).startMin)" @change="onEditField(s, 'startMin', ($event.target as HTMLInputElement).value)" />
               <span class="ed-label" :style="{ background: s.color ?? '#5a6270' }">{{ s.label }}</span>
               <span class="ed-slot">{{ s.characterSlot ?? "-" }}</span>
-              <input type="number" :value="editVal(s).durationMin" @change="onEditField(s, 'durationMin', ($event.target as HTMLInputElement).value)" />
+              <input type="number" :value="Math.round(editVal(s).durationMin)" @change="onEditField(s, 'durationMin', ($event.target as HTMLInputElement).value)" />
               <span class="ed-lane" :class="{ indep: s.lane === 'independent' }">
                 {{ s.lane === "independent" ? "不占推进" : "" }}
               </span>

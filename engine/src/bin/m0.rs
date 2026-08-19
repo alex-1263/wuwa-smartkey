@@ -87,7 +87,7 @@ fn main() {
             if cur_slot.is_some() && cur_slot != Some(slot) {
                 let switch_dev = input::default_binding(&format!("switch_{slot}"));
                 if let Some(dev) = switch_dev {
-                    wait_until(t0, s.start_min);
+                    wait_until(t0, s.start_min.round() as i64);
                     input::press(dev, Duration::from_millis(input::DEFAULT_TAP_MS));
                     println!(
                         "  [+{}ms] 切人 → {slot}",
@@ -99,7 +99,7 @@ fn main() {
             cur_slot = Some(slot);
         }
 
-        wait_until(t0, s.start_min);
+        wait_until(t0, s.start_min.round() as i64);
         let Some(dev) = input::default_binding(&s.move_id) else {
             println!("  [+{}ms] {} 无默认映射，跳过", t0.elapsed().as_millis(), s.label);
             continue;
@@ -119,7 +119,7 @@ fn main() {
 
 fn step_hold_ms(s: &ComboStep) -> u64 {
     if input::is_hold_move(&s.move_id) {
-        s.duration_min.max(input::DEFAULT_TAP_MS as i64) as u64
+        s.duration_min.round().max(input::DEFAULT_TAP_MS as f64) as u64
     } else {
         input::DEFAULT_TAP_MS
     }
