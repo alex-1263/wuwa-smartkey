@@ -1,0 +1,23 @@
+version: 2
+updates:
+  # Rust 依赖每周检查。
+  # 豁免：GHSA「Unsoundness in glib::VariantStrIter」（>=0.15, <0.20，修复于 0.20）。
+  # 本工具仅构建/分发 Windows 目标（SendInput + Win32 钩子），glib 是
+  # Tauri(GTK3, tao/wry) 在 Linux 平台的传递依赖，只存在于 lock 的跨平台
+  # 解析结果中，不进入任何发布产物；且 gtk 0.18 停在 ^0.18 时代线，
+  # 依赖结构上无法升到 0.20。待上游 tao/wry 迁移后移除本条豁免。
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    ignore:
+      - dependency-name: "glib"
+        versions: [">=0.15, <0.20"]
+  # 前端依赖每周检查（忽略仅大版本更新）
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
