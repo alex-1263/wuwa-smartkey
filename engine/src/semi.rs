@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use crate::chart::{ComboChart, ComboStep, PeriodKind};
+use crate::chart::{ComboChart, ComboPeriod, ComboStep, PeriodKind};
 use crate::input;
 use crate::listener::{self, KeyListener};
 use crate::scheduler::{hold_ms, PlaybackEvent, PlaybackOptions};
@@ -166,7 +166,12 @@ fn play_segment(
         }
         // 预输入：提前 preheat 按下
         let press_at = rel - s.preheat_ms.unwrap_or(0.0);
-        match wait_until_key(t0, press_at, stop, rx) {
+        // 干跑不等待真实时间（与 scheduler 一致，整轴瞬间走完）
+        match if opts.dry_run {
+            KeyEv::Ok
+        } else {
+            wait_until_key(t0, press_at, stop, rx)
+        } {
             KeyEv::Ok => {}
             KeyEv::Stopped => return SegEnd::Stopped,
             KeyEv::Switch(slot) => return SegEnd::Switched(slot),
@@ -221,7 +226,14 @@ fn run_semi(
     });
 
     let startup = segment_steps(&chart.startup_steps());
-    let loopsegs = segment_steps(&chart.loop_steps());
+    // 仅当轴显式声明了 LoopAxis 才构建循环段。
+    // steps_in_period 对缺失的 period 会退化为"全部步骤"，若不设防，
+    // 起手打完后第 2 轮会把全部步骤再当成循环段、无限重等切人键，
+    // 永不结束；裸格式（无 period）的轴应在完整播一遍后自然收尾。
+    let loopsegs = match chart.period(PeriodKind::LoopAxis) {
+        Some(_) => segment_steps(&chart.loop_steps()),
+        None => Vec::new(),
+    };
     if startup.is_empty() && loopsegs.is_empty() {
         cb(PlaybackEvent::Stopped {
             reason: "completed",
@@ -233,8 +245,9 @@ fn run_semi(
     let mut cur_slot: Option<u8> = None;
     let mut manual_stop = false;
     let mut round: u32 = 0;
-    // 起手轮算 1 轮，max_loops 限制的是其后的循环轮数
-    let max_rounds = 1 + opts.max_loops.unwrap_or(u32::MAX);
+    // 起手轮算 1 轮，max_loops 限制的是其后的循环轮数（无限时为 u32::MAX，
+    // 不能直接 1+u32::MAX——debug 构建下整数溢出 panic，播放线程启动即崩）
+    let max_rounds = opts.max_loops.map_or(u32::MAX, |n| n.saturating_add(1));
 
     'outer: while round < max_rounds {
         let queue: Vec<&Segment> = if round == 0 {
@@ -246,48 +259,52 @@ fn run_semi(
             break;
         }
         let mut i = 0usize;
+        // 段中切人打断携带的按键：直接消费开打下一段，不需要玩家再按一次
+        let mut carried: Option<u8> = None;
         while i < queue.len() {
-            // —— 等待阶段：玩家按匹配键 ——
-            loop {
-                let seg = queue[i];
-                cb(PlaybackEvent::WaitingSwitch {
-                    slot: seg.slot,
-                    round: round + 1,
-                    index: i + 1,
-                    total: queue.len(),
-                    steps: seg.steps.len(),
-                    approx_ms: seg.approx_ms.round() as i64,
-                });
-                let ev = if opts.dry_run {
-                    // 干跑无人按键：自动按期望键推进（段槽位未知时按 1）
-                    KeyEv::Switch(seg.slot.unwrap_or(1))
-                } else {
-                    wait_key(&stop, rx)
-                };
-                match ev {
-                    KeyEv::Stopped => {
-                        manual_stop = true;
-                        break 'outer;
-                    }
-                    KeyEv::Switch(slot) => {
-                        if !seg.matches(slot) {
-                            // 轴上后续存在的角色键：跳段（玩家手动同步节奏）
-                            match find_from(&queue, i + 1, slot) {
-                                Some(j) => i = j,
-                                None => {
-                                    cb(PlaybackEvent::KeyIgnored {
-                                        got: slot,
-                                        expected: seg.slot,
-                                    });
-                                    continue;
+            // —— 等待阶段：玩家按匹配键（carried 有值则跳过等待） ——
+            if carried.take().is_none() {
+                loop {
+                    let seg = queue[i];
+                    cb(PlaybackEvent::WaitingSwitch {
+                        slot: seg.slot,
+                        round: round + 1,
+                        index: i + 1,
+                        total: queue.len(),
+                        steps: seg.steps.len(),
+                        approx_ms: seg.approx_ms.round() as i64,
+                    });
+                    let ev = if opts.dry_run {
+                        // 干跑无人按键：自动按期望键推进（段槽位未知时按 1）
+                        KeyEv::Switch(seg.slot.unwrap_or(1))
+                    } else {
+                        wait_key(&stop, rx)
+                    };
+                    match ev {
+                        KeyEv::Stopped => {
+                            manual_stop = true;
+                            break 'outer;
+                        }
+                        KeyEv::Switch(slot) => {
+                            if !seg.matches(slot) {
+                                // 轴上后续存在的角色键：跳段（玩家手动同步节奏）
+                                match find_from(&queue, i + 1, slot) {
+                                    Some(j) => i = j,
+                                    None => {
+                                        cb(PlaybackEvent::KeyIgnored {
+                                            got: slot,
+                                            expected: seg.slot,
+                                        });
+                                        continue;
+                                    }
                                 }
                             }
+                            break;
                         }
-                        break;
+                        KeyEv::Ok => unreachable!("wait_key 无截止时间"),
                     }
-                    KeyEv::Ok => unreachable!("wait_key 无截止时间"),
                 }
-            }
+            } // if carried.is_none()
 
             // —— 播段阶段 ——
             let seg = queue[i];
@@ -314,8 +331,10 @@ fn run_semi(
                         // 从当前段（含）向后找：重按当前槽位 = 重打本段
                         match find_from(&queue, i, slot) {
                             Some(j) if j == i => continue,
+                            // 跳到匹配段并携带按键直接开打（玩家只按一次）
                             Some(j) => {
                                 i = j;
+                                carried = Some(slot);
                                 break;
                             }
                             // 后续没有该角色：回到等待阶段（重等当前段）
@@ -470,5 +489,81 @@ mod tests {
         assert_eq!(find_from(&queue, 0, 2), Some(1));
         assert_eq!(find_from(&queue, 2, 3), Some(2));
         assert_eq!(find_from(&queue, 1, 4), None);
+    }
+
+    /// 状态机集成回归：招式全部无按键映射（fake_*，不注入真实输入），
+    /// 手动喂数字键流驱动。覆盖"段中切人打断 → 按键直接带入匹配段开打"，
+    /// 以及无限循环（max_loops=None）不触发整数溢出。
+    #[test]
+    fn semi_state_machine_interrupt_carries_key() {
+        use std::sync::Mutex;
+
+        let chart = ComboChart {
+            id: "t".into(),
+            title: "状态机测试".into(),
+            steps: vec![
+                step("a", "fake_a", Some(1), 0.0),
+                step("b", "fake_b", Some(1), 500.0), // 500ms 处的第二招，给打断留窗口
+                step("c", "fake_c", Some(2), 1000.0),
+                step("d", "fake_d", Some(3), 2000.0),
+            ],
+            periods: vec![ComboPeriod {
+                id: "p1".into(),
+                kind: PeriodKind::StartupAxis,
+                start_ms: 0.0,
+                end_ms: 3000.0,
+                label: None,
+                character_slot: None,
+                lane: None,
+                loop_index: None,
+            }],
+            ..Default::default()
+        };
+        let (tx, rx) = std::sync::mpsc::channel::<u32>();
+        let tags: std::sync::Arc<Mutex<Vec<String>>> = std::sync::Arc::new(Mutex::new(Vec::new()));
+        let tags2 = tags.clone();
+        // 无限循环（max_loops=None → u32::MAX）同时回归整数溢出 panic；
+        // 本轴无 LoopAxis period，第 2 轮 queue 为空自然结束
+        let opts = PlaybackOptions {
+            dry_run: false,
+            max_loops: None,
+            ..Default::default()
+        };
+        let stop = Arc::new(AtomicBool::new(false));
+
+        let feeder = std::thread::spawn(move || {
+            let _ = tx.send(0x31); // 按 1：开打段 1（slot1）
+            std::thread::sleep(Duration::from_millis(100));
+            let _ = tx.send(0x33); // 段 1 第二招等待中按 3：打断并直接跳段 3
+        });
+        run_semi(&chart, &opts, stop, &rx, &move |ev: PlaybackEvent| {
+            let tag = match ev {
+                PlaybackEvent::WaitingSwitch { slot, index, .. } => {
+                    format!("wait{:?}@{}", slot, index)
+                }
+                PlaybackEvent::Switch { to, .. } => format!("switch{}", to),
+                PlaybackEvent::SegmentDone { slot, reason } => {
+                    format!("done{:?}:{}", slot, reason)
+                }
+                PlaybackEvent::Stopped { reason } => format!("stopped:{}", reason),
+                _ => return,
+            };
+            tags2.lock().unwrap().push(tag);
+        });
+        feeder.join().unwrap();
+
+        let evs = tags.lock().unwrap().clone();
+        assert_eq!(
+            evs,
+            vec![
+                "waitSome(1)@1".to_string(),
+                "switch1".into(),
+                "doneSome(1):switched".into(),
+                // 核心断言：打断后不重新等待，直接开打匹配段
+                "switch3".into(),
+                "doneSome(3):completed".into(),
+                "stopped:completed".into(),
+            ]
+        );
     }
 }
